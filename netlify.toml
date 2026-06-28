@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# Serve the app at the site root
+[[redirects]]
+  from = "/"
+  to = "/captain-jays-ap-hub.html"
+  status = 200
