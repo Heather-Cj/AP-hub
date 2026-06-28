@@ -219,31 +219,6 @@ export default async (req) => {
     return json({ ok: true, shards: shards.length, bills: bills.length });
   }
 
-  // ---- admin: wipe ALL bill data from storage (keeps vendors/users) ----
-  if (action === 'clearBills') {
-    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
-    let removed = 0;
-    const meta = await store.get('meta', { type: 'json' });
-    const shards = (meta && Array.isArray(meta.shards)) ? meta.shards : [];
-    for (const mk of shards) { try { await store.delete('bills:' + mk); removed++; } catch {} }
-    // also clear any stray shards and the legacy single blob, just in case
-    try { await store.delete('ops'); } catch {}
-    try {
-      const listing = await store.list({ prefix: 'bills:' });
-      for (const b of (listing.blobs || [])) { try { await store.delete(b.key); removed++; } catch {} }
-    } catch {}
-    // rewrite meta with zero bills but keep vendors/audit/settings
-    await store.setJSON('meta', {
-      vendors: (meta && meta.vendors) || [],
-      audit: (meta && meta.audit) || [],
-      deleted: (meta && meta.deleted) || { bills: [], vendors: [] },
-      nextId: (meta && meta.nextId) || 10001,
-      shards: [],
-      savedAt: Date.now(),
-    });
-    return json({ ok: true, removedShards: removed });
-  }
-
   if (action === 'upsertUser') {
     if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
     const users = await getUsers(store);
