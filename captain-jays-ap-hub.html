@@ -473,7 +473,6 @@ const API={
   async upsertUser(user){return (await this.call('upsertUser',{token:TOKEN,user})).users;},
   async deleteUser(u){return (await this.call('deleteUser',{token:TOKEN,u})).users;},
   async syncInvoice(record){return await this.call('syncInvoice',{token:TOKEN,record});},
-  async clearBills(){return await this.call('clearBills',{token:TOKEN});},
 };
 
 const App={
@@ -1010,47 +1009,22 @@ const App={
     const at=c=>BILLS.filter(b=>b.account===c);
     const stores=ACCOUNTS.filter(a=>a.type==='store'),ents=ACCOUNTS.filter(a=>a.type==='entity');
     const card=a=>{const bs=at(a.code);const f=FAISAL.includes(a.code);return `<div class="ent-card"><div class="ent-top"><div class="ent-code">${a.code}</div></div><div class="nm">${f?'Faisal · check-only':'&nbsp;'}</div><div class="ent-stat"><div class="open"><b>${bs.length}</b><span>bills</span></div><div style="text-align:right"><div class="mono" style="font-weight:700">${bs.length?money(bs.reduce((s,b)=>s+b.amount,0)):'—'}</div><div style="font-size:10.5px;color:var(--ink-3)">total</div></div></div></div>`};
-    return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto;display:flex;gap:8px">${CURRENT.role==='admin'?`<input type="file" id="histfile" accept="application/json" style="display:none" onchange="App.importHistory(this.files[0],App._histMode)"><button class="btn btn-ghost btn-sm" onclick="App._histMode='merge';document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.arrow,14)} Import history (JSON)</button><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="App._histMode='replace';document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.trash,13)} Replace all bills</button><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="App.clearBillsServer()">${svg(ICN.trash,13)} Clear bills (server)</button>`:''}</div></div><div class="section-title">Entities</div><div class="ent-grid" style="margin-bottom:24px">${ents.map(card).join('')}</div><div class="section-title">Stores (${stores.length})</div><div class="ent-grid">${stores.map(card).join('')}</div>`;
+    return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto;display:flex;gap:8px">${CURRENT.role==='admin'?`<input type="file" id="histfile" accept="application/json" style="display:none" onchange="App.importHistory(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.arrow,14)} Import history (JSON)</button>`:''}</div></div><div class="section-title">Entities</div><div class="ent-grid" style="margin-bottom:24px">${ents.map(card).join('')}</div><div class="section-title">Stores (${stores.length})</div><div class="ent-grid">${stores.map(card).join('')}</div>`;
   },
-  async clearBillsServer(){
-    if(CURRENT.role!=='admin')return;
-    if(!confirm('Delete ALL bills from the server? This wipes every bill (imported and entered) from storage. Vendors and users are kept. You can re-import afterward. Continue?'))return;
-    try{
-      const r=await API.clearBills();
-      // wipe local memory too so nothing stale gets saved back
-      BILLS=[];
-      this.toast('Server bills cleared'+(r&&r.removedShards!=null?' ('+r.removedShards+' shards)':''));
-      // reload fresh state from server
-      const d=await API.load();applyOps(d.ops);this.render();
-    }catch(e){this.toast('Clear failed — '+(e.message||''));}
-  },
-  importHistory(file,mode){
+  importHistory(file){
     if(!file||CURRENT.role!=='admin')return;
     const rd=new FileReader();
     rd.onload=()=>{
       let data;try{data=JSON.parse(rd.result);}catch(e){this.toast('That file isn\'t valid JSON');return;}
       const incoming=Array.isArray(data)?data:(data.bills||[]);
       if(!incoming.length){this.toast('No bills found in that file');return;}
-      if(mode==='replace'){
-        const before=BILLS.length;
-        // drop every imported bill (and any dup) — keep only bills created live in the portal
-        BILLS=BILLS.filter(b=>!b.imported);
-        const removed=before-BILLS.length;
-        incoming.forEach(b=>{if(b&&b.id!=null)BILLS.push(b);});
-        if(data.nextId&&data.nextId>nextId)nextId=data.nextId;
-        this.log('Replaced bill history','removed '+removed+' · loaded '+incoming.length);
-        this.persist();this.toast('Replaced: removed '+removed+', loaded '+incoming.length+' bills');this.render();
-        return;
-      }
       const byId=new Map(BILLS.map(b=>[b.id,b]));
       let added=0,updated=0;
       incoming.forEach(b=>{
         if(!b||b.id==null)return;
         const ex=byId.get(b.id);
         if(!ex){BILLS.push(b);byId.set(b.id,b);added++;}
-        else if(ex.imported){          // refresh previously-imported rows in place
-          Object.assign(ex,b);updated++;
-        }
+        else if(ex.imported){Object.assign(ex,b);updated++;}
       });
       if(data.nextId&&data.nextId>nextId)nextId=data.nextId;
       this.log('Imported history',added+' added, '+updated+' updated');
