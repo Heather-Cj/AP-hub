@@ -269,6 +269,14 @@ export default {
       return handleApi(req, env);
     }
     // serve the static HTML (and any other assets) from the ASSETS binding
-    return env.ASSETS.fetch(req);
+    const res = await env.ASSETS.fetch(req);
+    // Don't let the edge/browser cache the HTML, so deploys show up immediately.
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('text/html')) {
+      const h = new Headers(res.headers);
+      h.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return new Response(res.body, { status: res.status, headers: h });
+    }
+    return res;
   },
 };
