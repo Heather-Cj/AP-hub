@@ -478,7 +478,8 @@ function sortBy(rows,key,dir){const s=dir==='desc'?-1:1;const val=(b)=>{switch(k
 const monthTotal=(vn,acct,mk)=>BILLS.filter(b=>!b.isChase&&b.vendor===vn&&b.account===acct&&monthKey(b.receivedDate)===mk).reduce((s,b)=>s+(+b.amount||0),0);
 
 /* ===== backend: Netlify Functions + Blobs ===== */
-const API_BASE='/.netlify/functions/api';
+// API endpoint: '/api' on Cloudflare Workers; falls back to the Netlify function path if present.
+const API_BASE=(typeof location!=='undefined'&&location.hostname.includes('netlify'))?'/.netlify/functions/api':'/api';
 let TOKEN=null;
 const LS={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 /* local snapshot of server-confirmed data → instant paint on open, refresh in background */
@@ -634,7 +635,7 @@ const App={
     $('#navItems').querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{this.go(b.dataset.go);document.getElementById('nav').classList.remove('open')});
   },
   setActive(){$('#navItems').querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.go===this.state.view))},
-  go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.render()},
+  go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.state.billLimit=150;this.state.payLimit=150;this.render()},
 
   mine(b){return CURRENT.role==='admin'||can('view_all')?true:b.enteredBy===CURRENT.u;},
   routed(b){if(CURRENT.role==='admin')return true;return !b.approval||!b.approval.approver||b.approval.approver===CURRENT.u;},
@@ -796,14 +797,18 @@ const App={
     const st=this.state.billStage;
     let rows=this.scoped().filter(b=>this.matchBill(b)).filter(b=>st==='all'||this.statusKey(b)===st);
     rows=this.applySort(rows);
+    const total=rows.length;
+    const lim=this.state.billLimit||150;
+    const shown=rows.slice(0,lim);
+    const more=total-shown.length;
     return `
     <div class="filters">
       ${this.filterControls(true)}
-      <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${rows.length} bill${rows.length!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="bills">${svg(ICN.bills,14)} Export Excel</button>`:''}${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div>
+      <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${total} bill${total!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="bills">${svg(ICN.bills,14)} Export Excel</button>`:''}${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div>
     </div>
     <div class="card"><div class="tablewrap"><table>
       <thead><tr>${this.sortHdr('id','ID')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('account','Account')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th></tr></thead>
-      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}">
+      <tbody>${shown.length?shown.map(b=>`<tr class="click" data-bill="${b.id}">
         <td class="mono" style="font-weight:700">#${b.id}${b.link?` <a href="${b.link}" target="_blank" rel="noopener" title="View bill" onclick="event.stopPropagation()" style="color:var(--blue)">${svg(ICN.arrow,12)}</a>`:''}</td>
         <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
         <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account}</span></td>
@@ -816,8 +821,8 @@ const App={
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):'—')}</td>
         <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||'—'}</td>
-      </tr>`).join(''):`<tr><td colspan="11"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
-    </table></div></div>`;
+      </tr>`).join(''):`<tr><td colspan="12"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
+    </table></div>${more>0?`<div style="padding:12px 16px;text-align:center;border-top:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" data-more="bill">Show ${Math.min(150,more)} more · ${more} hidden</button> <span style="font-size:12px;color:var(--ink-3);margin-left:8px">Tip: use search or filters to narrow down</span></div>`:''}</div>`;
   },
 
   /* ---------- PAYMENTS (all payments — make payment & track) ---------- */
@@ -832,6 +837,10 @@ const App={
     const batchable=Object.entries(vgroups).filter(([v,arr])=>arr.length>1).sort((a,b)=>b[1].length-a[1].length);
     let allp=BILLS.filter(b=>this.matchBill(b)&&(b.paid||b.payType==='check'||b.isChase));
     allp=this.applySort(allp);
+    const ptotal=allp.length;
+    const plim=this.state.payLimit||150;
+    const pshown=allp.slice(0,plim);
+    const pmore=ptotal-pshown.length;
     const rowBg=b=>{const u=sendUrgency(b);return u.level==='red'?'background:rgba(220,38,38,.06)':u.level==='amber'?'background:rgba(217,119,6,.06)':'';};
     const nextAction=b=>{
       if(!b.payType)return `<button class="btn btn-gold" data-record="${b.id}" style="flex-shrink:0">${svg(ICN.dollar,15)} Pay Bill</button>`;
@@ -854,11 +863,11 @@ const App={
     </div>
     <div class="filters">
       ${this.filterControls(false)}
-      <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${allp.length} payment${allp.length!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="payments">${svg(ICN.bills,14)} Export Excel</button>`:''}</div>
+      <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${ptotal} payment${ptotal!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="payments">${svg(ICN.bills,14)} Export Excel</button>`:''}</div>
     </div>
     <div class="card"><div class="card-h"><h3>All payments</h3><span class="sub">paid, in process & Chase</span></div>
       <div class="tablewrap"><table><thead><tr>${this.sortHdr('id','ID')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('account','Account')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('date','Date')}<th>By</th></tr></thead>
-      <tbody>${allp.length?allp.map(b=>`<tr class="click" data-bill="${b.id}">
+      <tbody>${pshown.length?pshown.map(b=>`<tr class="click" data-bill="${b.id}">
         <td class="mono" style="font-weight:700">#${b.id}</td>
         <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
         <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account}</span></td>
@@ -868,8 +877,7 @@ const App={
         <td class="mono" style="font-size:12px">${b.checkNumber||(b.isChase&&b.tracking)||'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):(b.printed?fmtD(b.printed.date):'—'))}</td>
         <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||(b.printed&&b.printed.initials)||'—'}</td>
-      </tr>`).join(''):`<tr><td colspan="9"><div class="empty">${svg(ICN.check,30)}<div>No payments yet.</div></div></td></tr>`}</tbody></table></div>
-    </div>`;
+      </tr>`).join(''):`<tr><td colspan="9"><div class="empty">${svg(ICN.check,30)}<div>No payments yet.</div></div></td></tr>`}</tbody></table></div>${pmore>0?`<div style="padding:12px 16px;text-align:center;border-top:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" data-more="pay">Show ${Math.min(150,pmore)} more · ${pmore} hidden</button> <span style="font-size:12px;color:var(--ink-3);margin-left:8px">Tip: use search or filters to narrow down</span></div>`:''}</div>`;
   },
 
   /* ---------- PICKUPS (printed → cut → ready for pickup → picked up) ---------- */
@@ -1212,6 +1220,7 @@ const App={
     v.querySelectorAll('[data-apprtab]').forEach(b=>b.onclick=()=>{this.state.apprTab=b.dataset.apprtab;this.render()});
     v.querySelectorAll('[data-picktab]').forEach(b=>b.onclick=()=>{this.state.pickTab=b.dataset.picktab;this.render()});
     v.querySelectorAll('[data-deltab]').forEach(b=>b.onclick=()=>{this.state.delTab=b.dataset.deltab;this.render()});
+    v.querySelectorAll('[data-more]').forEach(b=>b.onclick=()=>{if(b.dataset.more==='bill')this.state.billLimit=(this.state.billLimit||150)+150;else this.state.payLimit=(this.state.payLimit||150)+150;this.render();});
     v.querySelectorAll('[data-acct-set]').forEach(el=>el.onclick=e=>{e.stopPropagation();this.state.acct=el.dataset.acctSet;this.go('bills')});
     v.querySelectorAll('[data-bill]').forEach(el=>el.onclick=e=>{if(e.target.closest('button')||e.target.closest('a'))return;this.openBill(el.dataset.bill)});
     v.querySelectorAll('[data-new]').forEach(b=>b.onclick=()=>this.openCreate());
@@ -1257,10 +1266,12 @@ const App={
           <div class="field"><label>Account</label><select id="f_acct" class="selent" style="width:100%" onchange="App.entryRecalc()"><option value="">Select…</option><optgroup label="Stores">${stores.map(a=>`<option value="${a.code}">${a.code}</option>`).join('')}</optgroup><optgroup label="Entities">${ents.map(a=>`<option value="${a.code}">${a.code}</option>`).join('')}</optgroup></select></div>
           <div class="field"><label>Invoice #</label><div class="inp" style="padding:0"><input id="f_inv" placeholder="e.g. INV-1042" style="${inp}"></div></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-          <div class="field"><label>Amount</label><div class="inp" style="padding:0"><input id="f_amt" type="number" step="0.01" oninput="App.entryRecalc()" placeholder="0.00" style="${inp}"></div></div>
-          <div class="field"><label>Invoice date</label>${dateField('f_invdate','')}</div>
-          <div class="field"><label>Due date</label>${dateField('f_due','','App.entryRecalc()')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="field" style="min-width:0"><label>Amount</label><div class="inp" style="padding:0"><input id="f_amt" type="number" step="0.01" inputmode="decimal" oninput="App.entryRecalc()" placeholder="0.00" style="${inp};min-width:0;width:100%"></div></div>
+          <div class="field" style="min-width:0"><label>Invoice date</label>${dateField('f_invdate','')}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr;gap:12px">
+          <div class="field" style="min-width:0"><label>Due date</label>${dateField('f_due','','App.entryRecalc()')}</div>
         </div>
         <div class="field"><label>GL account</label><div class="inp" style="padding:0"><input id="f_gl" list="gllist" placeholder="e.g. Utilities, Rent, Supplies…" style="${inp}"></div><datalist id="gllist"><option value="Utilities"><option value="Rent"><option value="Supplies"><option value="Insurance"><option value="Repairs & Maintenance"><option value="Food · COGS"><option value="Licenses & Fees"><option value="Security"></datalist></div>
         <div class="field"><label>Link to bill <span style="color:var(--ink-3)">· paste OneDrive / document URL</span></label><div class="inp" style="padding:0"><input id="f_link" placeholder="https://… (we link, never store the file)" style="${inp}"></div></div>
@@ -2098,7 +2109,7 @@ const App={
                  else { b.xl = (r&&r.updated)?'updated':'added'; } })
       .catch(e=>{ if(!e.offline) console.warn('Excel sync failed:', e.message||e); });
   },
-  search(q){this.state.q=q;if(['bills','vendors'].includes(this.state.view))this.render();else this.go('bills');},
+  search(q){this.state.q=q;this.state.billLimit=150;this.state.payLimit=150;if(['bills','vendors'].includes(this.state.view))this.render();else this.go('bills');},
   toast(msg){const t=document.createElement('div');t.className='toast';t.innerHTML=`${svg(ICN.check,16)}${msg}`;$('#toasts').appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},2600)},
 };
 if(typeof pdfjsLib!=='undefined'){try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch(e){}}

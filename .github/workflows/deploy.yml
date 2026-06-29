@@ -1,0 +1,37 @@
+name: Deploy to Cloudflare
+
+# Auto-deploys the AP Hub to Cloudflare Workers on every push to main.
+# Also runnable manually from the Actions tab (workflow_dispatch).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'captain-jays-ap-hub.html'
+      - 'worker.mjs'
+      - 'wrangler.toml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Build public/ from the app HTML
+        # The worker serves ./public as static assets. We keep ONE HTML file
+        # (captain-jays-ap-hub.html) and copy it into place at build time,
+        # so there is never a second copy to keep in sync.
+        run: |
+          mkdir -p public
+          cp captain-jays-ap-hub.html public/index.html
+
+      - name: Syntax-check the worker
+        run: node --check worker.mjs
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

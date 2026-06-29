@@ -1,0 +1,274 @@
+// Captain Jay's AP Hub — Cloudflare Worker backend
+// Serves the static HTML AND handles the /api endpoint in one Worker.
+// Storage: Workers KV (binding name: AP_HUB).
+// Auth: stateless HMAC session tokens. Passwords hashed with PBKDF2 (Web Crypto).
+// No money ever moves here — this only stores what your staff records.
+
+const TTL = 1000 * 60 * 60 * 12; // sessions last 12 hours
+
+// ---------- small helpers ----------
+const json = (obj, status = 200) =>
+  new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
+
+const enc = new TextEncoder();
+const b64u = (bytes) => {
+  // bytes: Uint8Array OR string
+  const arr = typeof bytes === 'string' ? enc.encode(bytes) : bytes;
+  let bin = '';
+  for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const b64uToBytes = (s) => {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+const hex = (bytes) => Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+const hexToBytes = (h) => {
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.substr(i * 2, 2), 16);
+  return out;
+};
+
+// ---------- HMAC session tokens (Web Crypto) ----------
+async function hmacSign(secret, msg) {
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(msg)));
+  return b64u(sig);
+}
+async function signToken(secret, payload) {
+  const body = b64u(JSON.stringify({ ...payload, exp: Date.now() + TTL }));
+  const sig = await hmacSign(secret, body);
+  return body + '.' + sig;
+}
+async function verifyToken(secret, tok) {
+  if (!tok || typeof tok !== 'string' || !tok.includes('.')) return null;
+  const [body, sig] = tok.split('.');
+  const expect = await hmacSign(secret, body);
+  // constant-ish time compare
+  if (expect.length !== sig.length) return null;
+  let diff = 0; for (let i = 0; i < expect.length; i++) diff |= expect.charCodeAt(i) ^ sig.charCodeAt(i);
+  if (diff !== 0) return null;
+  let p;
+  try { p = JSON.parse(new TextDecoder().decode(b64uToBytes(body))); } catch { return null; }
+  if (!p.exp || Date.now() > p.exp) return null;
+  return p;
+}
+
+// ---------- password hashing (PBKDF2 via Web Crypto) ----------
+async function pbkdf2(pw, saltBytes) {
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(String(pw)), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' },
+    baseKey, 256
+  );
+  return new Uint8Array(bits);
+}
+async function hashPw(pw) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await pbkdf2(pw, salt);
+  return hex(salt) + ':' + hex(hash);
+}
+async function verifyPw(pw, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [saltHex, hashHex] = stored.split(':');
+  let cand;
+  try { cand = await pbkdf2(pw, hexToBytes(saltHex)); } catch { return false; }
+  const a = hexToBytes(hashHex);
+  if (a.length !== cand.length) return false;
+  let diff = 0; for (let i = 0; i < a.length; i++) diff |= a[i] ^ cand[i];
+  return diff === 0;
+}
+
+const sanitize = (u) => ({ u: u.u, name: u.name, role: u.role, initials: u.initials, inTraining: !!u.inTraining, tier: u.role === 'admin' ? undefined : (Number(u.tier) || 1), perms: u.role === 'admin' ? undefined : (Array.isArray(u.perms) ? u.perms : undefined) });
+
+// ---------- KV-backed store (mirrors the old Netlify Blobs interface) ----------
+function makeStore(kv) {
+  return {
+    async getJSON(key) { return await kv.get(key, { type: 'json' }); },
+    async setJSON(key, val) { await kv.put(key, JSON.stringify(val)); },
+    async del(key) { await kv.delete(key); },
+  };
+}
+
+async function getUsers(store) {
+  const v = await store.getJSON('users');
+  if (Array.isArray(v) && v.length) return v;
+  const seed = [{ u: 'heather', name: 'Heather Williams', role: 'admin', initials: 'HW', pw: await hashPw('captain2657') }];
+  await store.setJSON('users', seed);
+  return seed;
+}
+
+const monthKeyOf = (b) => {
+  const d = String((b && b.receivedDate) || '');
+  const m = d.match(/^(\d{4})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}` : 'undated';
+};
+
+// ---------- Microsoft Graph / Excel sync (optional, via env vars) ----------
+function msConfig(env) {
+  return {
+    tenant: env.MS_TENANT_ID, client: env.MS_CLIENT_ID, secret: env.MS_CLIENT_SECRET,
+    siteId: env.MS_SITE_ID, driveId: env.MS_DRIVE_ID || '', itemId: env.MS_ITEM_ID || '',
+    filePath: env.MS_FILE_PATH || '', worksheet: env.MS_WORKSHEET || 'Sheet1',
+    table: env.MS_TABLE || 'Invoices', keyCol: env.MS_KEY_COLUMN || 'Invoice Id',
+  };
+}
+const msReady = (MS) => MS.tenant && MS.client && MS.secret && MS.siteId && (MS.itemId || MS.filePath);
+let _tok = { v: null, exp: 0 };
+async function graphToken(MS) {
+  if (_tok.v && Date.now() < _tok.exp - 60000) return _tok.v;
+  const r = await fetch(`https://login.microsoftonline.com/${MS.tenant}/oauth2/v2.0/token`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: MS.client, client_secret: MS.secret, grant_type: 'client_credentials', scope: 'https://graph.microsoft.com/.default' }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error('token: ' + (d.error_description || JSON.stringify(d)));
+  _tok = { v: d.access_token, exp: Date.now() + (d.expires_in || 3600) * 1000 };
+  return _tok.v;
+}
+async function graph(MS, path, opts = {}) {
+  const t = await graphToken(MS);
+  const r = await fetch('https://graph.microsoft.com/v1.0' + path, { ...opts, headers: { authorization: 'Bearer ' + t, 'content-type': 'application/json', ...(opts.headers || {}) } });
+  const text = await r.text();
+  let d; try { d = text ? JSON.parse(text) : {}; } catch { d = { raw: text }; }
+  if (!r.ok) { const e = new Error('graph ' + r.status + ': ' + (d.error?.message || text)); e.status = r.status; throw e; }
+  return d;
+}
+function workbookBase(MS) {
+  if (MS.itemId) return MS.driveId ? `/drives/${MS.driveId}/items/${MS.itemId}` : `/sites/${MS.siteId}/drive/items/${MS.itemId}`;
+  const p = encodeURIComponent(MS.filePath).replace(/%2F/g, '/');
+  return MS.driveId ? `/drives/${MS.driveId}/root:/${p}:` : `/sites/${MS.siteId}/drive/root:/${p}:`;
+}
+async function excelUpsert(MS, record) {
+  const base = workbookBase(MS);
+  const tbl = `${base}/workbook/tables('${encodeURIComponent(MS.table)}')`;
+  const cols = (await graph(MS, `${tbl}/columns?$select=name,index`)).value.sort((a, b) => a.index - b.index).map((c) => c.name);
+  const keyIdx = cols.indexOf(MS.keyCol);
+  if (keyIdx < 0) throw new Error(`Key column "${MS.keyCol}" not found. Headers: ${cols.join(', ')}`);
+  const rowArr = cols.map((name) => (record[name] !== undefined && record[name] !== null) ? record[name] : '');
+  const keyVal = String(record[MS.keyCol] ?? '').trim();
+  if (!keyVal) throw new Error('record has no value for key column ' + MS.keyCol);
+  const rows = (await graph(MS, `${tbl}/rows?$select=index,values`)).value;
+  const hit = rows.find((row) => String((row.values?.[0] || [])[keyIdx] ?? '').trim() === keyVal);
+  if (hit) { await graph(MS, `${tbl}/rows/itemAt(index=${hit.index})`, { method: 'PATCH', body: JSON.stringify({ values: [rowArr] }) }); return { updated: true, index: hit.index }; }
+  await graph(MS, `${tbl}/rows/add`, { method: 'POST', body: JSON.stringify({ values: [rowArr] }) });
+  return { added: true };
+}
+
+// ---------- the API handler ----------
+async function handleApi(req, env) {
+  const SECRET = env.AP_HUB_SECRET || 'PLEASE-SET-AP_HUB_SECRET';
+  const url = new URL(req.url);
+  const action = url.searchParams.get('action');
+  const store = makeStore(env.AP_HUB);
+  let body = {};
+  if (req.method === 'POST') { try { body = await req.json(); } catch {} }
+
+  if (action === 'login') {
+    const users = await getUsers(store);
+    const user = users.find((x) => x.u.toLowerCase() === String(body.u || '').toLowerCase());
+    if (!user || !(await verifyPw(body.p, user.pw))) return json({ error: 'Incorrect username or password' }, 401);
+    return json({ token: await signToken(SECRET, { u: user.u, role: user.role }), user: sanitize(user) });
+  }
+
+  const tok = await verifyToken(SECRET, body.token || url.searchParams.get('token'));
+  if (!tok) return json({ error: 'Session expired — please sign in again' }, 401);
+
+  if (action === 'load') {
+    const users = await getUsers(store);
+    const meta = await store.getJSON('meta');
+    if (meta && Array.isArray(meta.shards)) {
+      let bills = [];
+      for (const mk of meta.shards) {
+        const chunk = await store.getJSON('bills:' + mk);
+        if (Array.isArray(chunk)) bills = bills.concat(chunk);
+      }
+      const ops = { vendors: meta.vendors || [], bills, audit: meta.audit || [], deleted: meta.deleted || { bills: [], vendors: [] }, nextId: meta.nextId || 10001 };
+      return json({ ops, users: users.map(sanitize) });
+    }
+    const ops = await store.getJSON('ops');
+    return json({ ops: ops || null, users: users.map(sanitize) });
+  }
+
+  if (action === 'saveOps') {
+    const o = body.ops || {};
+    const del = o.deleted && typeof o.deleted === 'object' ? o.deleted : {};
+    const bills = Array.isArray(o.bills) ? o.bills : [];
+    const groups = {};
+    for (const b of bills) { const mk = monthKeyOf(b); (groups[mk] = groups[mk] || []).push(b); }
+    const shards = Object.keys(groups).sort();
+    const prevMeta = await store.getJSON('meta');
+    const prevShards = (prevMeta && Array.isArray(prevMeta.shards)) ? prevMeta.shards : [];
+    for (const mk of shards) await store.setJSON('bills:' + mk, groups[mk]);
+    for (const mk of prevShards) if (!groups[mk]) { try { await store.del('bills:' + mk); } catch {} }
+    await store.setJSON('meta', {
+      vendors: Array.isArray(o.vendors) ? o.vendors : [],
+      audit: Array.isArray(o.audit) ? o.audit.slice(0, 800) : [],
+      deleted: { bills: Array.isArray(del.bills) ? del.bills : [], vendors: Array.isArray(del.vendors) ? del.vendors : [] },
+      nextId: o.nextId || 10001, shards, savedAt: Date.now(),
+    });
+    return json({ ok: true, shards: shards.length, bills: bills.length });
+  }
+
+  if (action === 'upsertUser') {
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    const users = await getUsers(store);
+    const inc = body.user || {};
+    const uname = String(inc.u || '').trim();
+    if (!uname) return json({ error: 'Username required' }, 400);
+    const i = users.findIndex((x) => x.u.toLowerCase() === uname.toLowerCase());
+    const base = i >= 0 ? users[i] : {};
+    const merged = {
+      u: uname,
+      name: inc.name ?? base.name ?? uname,
+      role: inc.role ?? base.role ?? 'entry',
+      initials: (inc.initials ?? base.initials ?? uname.slice(0, 2)).toUpperCase(),
+      inTraining: inc.inTraining ?? base.inTraining ?? false,
+      tier: (inc.role ?? base.role) === 'admin' ? undefined : (Number(inc.tier ?? base.tier) || 1),
+      perms: (inc.role ?? base.role) === 'admin' ? undefined : (Array.isArray(inc.perms) ? inc.perms : (Array.isArray(base.perms) ? base.perms : undefined)),
+      pw: inc.password ? await hashPw(inc.password) : base.pw,
+    };
+    if (!merged.pw) return json({ error: 'Password required for a new user' }, 400);
+    if (i >= 0) users[i] = merged; else users.push(merged);
+    await store.setJSON('users', users);
+    return json({ users: users.map(sanitize) });
+  }
+
+  if (action === 'deleteUser') {
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    let users = await getUsers(store);
+    const target = String(body.u || '').toLowerCase();
+    users = users.filter((x) => x.u.toLowerCase() !== target);
+    if (!users.some((x) => x.role === 'admin')) return json({ error: 'Cannot remove the last admin' }, 400);
+    await store.setJSON('users', users);
+    return json({ users: users.map(sanitize) });
+  }
+
+  const MS = msConfig(env);
+  if (action === 'syncStatus') return json({ configured: !!msReady(MS), table: MS.table, worksheet: MS.worksheet, keyCol: MS.keyCol });
+  if (action === 'syncInvoice') {
+    if (!msReady(MS)) return json({ error: 'Excel sync not configured (missing MS_* env vars)', configured: false }, 400);
+    const rec = body.record && typeof body.record === 'object' ? body.record : null;
+    if (!rec) return json({ error: 'No record provided' }, 400);
+    try { const res = await excelUpsert(MS, rec); return json({ ok: true, ...res }); }
+    catch (e) { return json({ error: String(e.message || e), status: e.status || 500 }, 200); }
+  }
+
+  return json({ error: 'Unknown action' }, 400);
+}
+
+// ---------- entry point: route /api to the handler, everything else to static assets ----------
+export default {
+  async fetch(req, env, ctx) {
+    const url = new URL(req.url);
+    if (url.pathname === '/api' || url.pathname === '/api/') {
+      return handleApi(req, env);
+    }
+    // serve the static HTML (and any other assets) from the ASSETS binding
+    return env.ASSETS.fetch(req);
+  },
+};

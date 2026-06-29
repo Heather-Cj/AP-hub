@@ -1,0 +1,30 @@
+#:schema node_modules/wrangler/config-schema.json
+# Captain Jay's AP Hub — Cloudflare Worker config
+# Deploy with:  npx wrangler deploy
+# (first time) create the KV namespace, then paste its id below.
+
+name = "captainjays-ap-hub"
+main = "worker.mjs"
+compatibility_date = "2026-01-01"
+
+# --- Static assets: serves your HTML file (and anything in ./public) ---
+# Put captain-jays-ap-hub.html in ./public/index.html so it loads at the root URL.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# --- Workers KV: the datastore (replaces Netlify Blobs) ---
+# 1) Run:  npx wrangler kv namespace create AP_HUB
+# 2) Wrangler prints an id — paste it below.
+[[kv_namespaces]]
+binding = "AP_HUB"
+id = "6a63cd74788a46519c2ad5773f78dab2"
+
+# --- Secrets (do NOT put real secrets in this file) ---
+# Set the session secret once with:
+#   npx wrangler secret put AP_HUB_SECRET
+# (type any long random string when prompted)
+#
+# Optional — only if you use the Excel/SharePoint sync — set each with `wrangler secret put`:
+#   MS_TENANT_ID  MS_CLIENT_ID  MS_CLIENT_SECRET  MS_SITE_ID
+#   MS_ITEM_ID (or MS_FILE_PATH)  MS_WORKSHEET  MS_TABLE  MS_KEY_COLUMN  MS_DRIVE_ID
