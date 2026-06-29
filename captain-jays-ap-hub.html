@@ -512,7 +512,7 @@ const API={
 };
 
 const App={
-  state:{view:'dashboard',acct:'all',q:'',billStage:'all',method:'all',month:'all',sortKey:'id',sortDir:'desc',checkTab:'print',vMethod:'all',vStatus:'active',vSort:'name',vDir:'asc'},
+  state:{view:'dashboard',acct:'all',q:'',billStage:'all',method:'all',month:'all',sortKey:'id',sortDir:'desc',checkTab:'print',vMethod:'all',vStatus:'active',vSort:'name',vDir:'asc',trackTab:'send',tSort:'vendor',tDir:'asc'},
 
   async init(){
     TOKEN=LS.get('aphub_token');
@@ -771,17 +771,24 @@ const App={
 
   /* ---------- APPROVALS ---------- */
   v_approvals(){
-    const rows=BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b));
-    const done=BILLS.filter(b=>b.approval&&b.approval.status&&b.approval.status!=='pending').slice(0,12);
-    return `
-    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pending your approval</h3><span class="sub">${rows.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>ID</th><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Approver</th><th class="r"></th></tr></thead>
-      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td style="font-size:12.5px">${b.approval&&b.approval.approver?(USERS.find(u=>u.u===b.approval.approver)||{}).name||b.approval.approver:'Any'}</td><td class="r"><button class="btn btn-gold btn-sm" data-approve="${b.id}">${svg(ICN.check,13)} Review</button></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.check,30)}<div>Nothing waiting on you.</div></div></td></tr>`}</tbody></table></div>
-    </div>
-    <div class="card"><div class="card-h"><h3>Recently decided</h3></div>
-      <div class="tablewrap"><table><thead><tr><th>ID</th><th>Vendor</th><th class="r">Amount</th><th>Decision</th><th>By</th></tr></thead>
-      <tbody>${done.length?done.map(b=>`<tr><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td>${b.approval.status==='approved'?'<span class="badge b-green"><span class="dot"></span>Approved</span>':'<span class="badge b-red"><span class="dot"></span>Rejected</span>'}</td><td>${b.approval.byInitials||''}</td></tr>`).join(''):`<tr><td colspan="5"><div class="empty">${svg(ICN.clock,30)}<div>No decisions yet.</div></div></td></tr>`}</tbody></table></div>
-    </div>`;
+    const pending=BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b));
+    const done=BILLS.filter(b=>b.approval&&b.approval.status&&b.approval.status!=='pending').slice(0,40);
+    const tab=this.state.apprTab||'pending';
+    const tabs=[['pending','Pending your approval',pending.length],['decided','Recently decided',done.length]];
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-apprtab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}</div>`;
+    let body='';
+    if(tab==='pending'){
+      const rows=this.gsortRows('apprP',pending,{id:b=>b.id,vendor:b=>(b.vendor||'').toLowerCase(),account:b=>b.account||'',amount:b=>+b.amount||0},'id');
+      body=`<div class="card"><div class="card-h"><h3>Pending your approval</h3><span class="sub">${pending.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('apprP','id','ID')}${this.gh('apprP','vendor','Vendor')}${this.gh('apprP','account','Account')}${this.gh('apprP','amount','Amount','r')}<th>Approver</th><th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td style="font-size:12.5px">${b.approval&&b.approval.approver?(USERS.find(u=>u.u===b.approval.approver)||{}).name||b.approval.approver:'Any'}</td><td class="r"><button class="btn btn-gold btn-sm" data-approve="${b.id}">${svg(ICN.check,13)} Review</button></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.check,30)}<div>Nothing waiting on you.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else {
+      const rows=this.gsortRows('apprD',done,{id:b=>b.id,vendor:b=>(b.vendor||'').toLowerCase(),amount:b=>+b.amount||0,decision:b=>b.approval.status||'',by:b=>b.approval.byInitials||''},'id');
+      body=`<div class="card"><div class="card-h"><h3>Recently decided</h3><span class="sub">${done.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('apprD','id','ID')}${this.gh('apprD','vendor','Vendor')}${this.gh('apprD','amount','Amount','r')}${this.gh('apprD','decision','Decision')}${this.gh('apprD','by','By')}</tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td>${b.approval.status==='approved'?'<span class="badge b-green"><span class="dot"></span>Approved</span>':'<span class="badge b-red"><span class="dot"></span>Rejected</span>'}</td><td>${b.approval.byInitials||''}</td></tr>`).join(''):`<tr><td colspan="5"><div class="empty">${svg(ICN.clock,30)}<div>No decisions yet.</div></div></td></tr>`}</tbody></table></div></div>`;
+    }
+    return tabBar+body;
   },
 
   /* ---------- ALL BILLS ---------- */
@@ -871,19 +878,28 @@ const App={
     const ready=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup');
     const done=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickedup');
     const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
-    return `
-    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Ready for pickup</h3><span class="sub">${ready.length} waiting · ${money(sum(ready))}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>ID</th><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Cut by</th><th class="r"></th></tr></thead>
-      <tbody>${ready.length?ready.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||b.account}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${can('pickup')?`<button class="btn btn-gold btn-sm" data-pickup="${b.id}">${svg(ICN.truck,14)} Mark picked up</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>No checks waiting for pickup. They appear here once printed &amp; cut.</div></div></td></tr>`}</tbody></table></div>
-    </div>
-    ${processing.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Being prepared</h3><span class="sub">${processing.length} · in Checks Processing (to cut)</span></div>
-      <div class="tablewrap"><table><thead><tr><th>ID</th><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Status</th></tr></thead>
-      <tbody>${processing.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td>${statusBadge(b)}</td></tr>`).join('')}</tbody></table></div>
-    </div>`:''}
-    <div class="card"><div class="card-h"><h3>Picked up</h3><span class="sub">${done.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>ID</th><th>Vendor</th><th class="r">Amount</th><th>Check #</th><th>Picked up</th><th>By</th></tr></thead>
-      <tbody>${done.length?done.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.pickedUp?fmtD(b.pickedUp.date):'—'}</td><td>${b.pickedUp?b.pickedUp.initials:'—'}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing picked up yet.</div></div></td></tr>`}</tbody></table></div>
-    </div>`;
+    const tab=this.state.pickTab||'ready';
+    const tabs=[['ready','Ready for pickup',ready.length],['prep','Being prepared',processing.length],['done','Picked up',done.length]];
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-picktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}</div>`;
+    const vf={id:b=>b.id,vendor:b=>(b.vendor||'').toLowerCase(),account:b=>b.account||'',amount:b=>+b.amount||0,check:b=>b.checkNumber||''};
+    let body='';
+    if(tab==='ready'){
+      const rows=this.gsortRows('pkR',ready,vf,'id');
+      body=`<div class="card"><div class="card-h"><h3>Ready for pickup</h3><span class="sub">${ready.length} waiting · ${money(sum(ready))}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('pkR','id','ID')}${this.gh('pkR','vendor','Vendor')}${this.gh('pkR','account','Account')}${this.gh('pkR','amount','Amount','r')}${this.gh('pkR','check','Check #')}<th>Cut by</th><th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||b.account}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${can('pickup')?`<button class="btn btn-gold btn-sm" data-pickup="${b.id}">${svg(ICN.truck,14)} Mark picked up</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>No checks waiting for pickup. They appear here once printed &amp; cut.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else if(tab==='prep'){
+      const rows=this.gsortRows('pkP',processing,vf,'id');
+      body=`<div class="card"><div class="card-h"><h3>Being prepared</h3><span class="sub">${processing.length} · in Checks Processing (to cut)</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('pkP','id','ID')}${this.gh('pkP','vendor','Vendor')}${this.gh('pkP','account','Account')}${this.gh('pkP','amount','Amount','r')}${this.gh('pkP','check','Check #')}<th>Status</th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td>${statusBadge(b)}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing being prepared.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else {
+      const rows=this.gsortRows('pkD',done,{...vf,pickedup:b=>(b.pickedUp&&b.pickedUp.date)||''},'id');
+      body=`<div class="card"><div class="card-h"><h3>Picked up</h3><span class="sub">${done.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('pkD','id','ID')}${this.gh('pkD','vendor','Vendor')}${this.gh('pkD','amount','Amount','r')}${this.gh('pkD','check','Check #')}${this.gh('pkD','pickedup','Picked up')}<th>By</th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.pickedUp?fmtD(b.pickedUp.date):'—'}</td><td>${b.pickedUp?b.pickedUp.initials:'—'}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing picked up yet.</div></div></td></tr>`}</tbody></table></div></div>`;
+    }
+    return tabBar+body;
   },
 
   /* ---------- CHECKS PROCESSING (print[Chase] → cut → send → deposit[Chase]) ---------- */
@@ -903,13 +919,21 @@ const App={
       <div class="tablewrap"><table><thead><tr><th>Type</th><th>Account</th><th class="r">Amount</th><th>Kind</th><th class="r"></th></tr></thead>
       <tbody>${toPrint.length?toPrint.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td style="font-size:12px">${b.isChase?'<span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':b.method}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-print="${b.id}">${svg(ICN.check,13)} Print check</button>`:''}</td></tr>`).join(''):`<tr><td colspan="5"><div class="empty">${svg(ICN.check,30)}<div>No Chase checks to print. Regular checks are printed from <b>Pay Bill</b> and arrive in To Cut.</div></div></td></tr>`}</tbody></table></div></div>`;
     } else if(tab==='cut'){
+      const tkey=this.state.tSort||'vendor',tdir=this.state.tDir==='desc'?-1:1;
+      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'check':return b.checkNumber||'';default:return (b.vendor||'').toLowerCase();}};
+      const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
+      const rows=toCut.slice().sort((a,b)=>{const x=tval(a),y=tval(b);return (x<y?-1:x>y?1:a.id-b.id)*tdir;});
       body=`<div class="card"><div class="card-h"><h3>Checks to be Cut</h3><span class="sub">${money(sum(toCut))} · ${toCut.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>Type</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Batch</th><th>Printed by</th><th class="r"></th></tr></thead>
-      <tbody>${toCut.length?toCut.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}${b.payType==='pickup'?' <span class="badge b-amber" style="font-size:9px;padding:1px 6px">PICKUP</span>':''}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td style="font-size:12px">${b.printed?b.printed.initials+' · '+fmtD(b.printed.date):'—'}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-cut="${b.id}">${svg(ICN.check,13)} Mark Cut</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.check,30)}<div>Nothing waiting to cut.</div></div></td></tr>`}</tbody></table></div></div>`;
+      <div class="tablewrap"><table><thead><tr>${th('vendor','Type')}${th('account','Account')}${th('amount','Amount','r')}${th('check','Check #')}<th>Batch</th><th>Printed by</th><th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}${b.payType==='pickup'?' <span class="badge b-amber" style="font-size:9px;padding:1px 6px">PICKUP</span>':''}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td style="font-size:12px">${b.printed?b.printed.initials+' · '+fmtD(b.printed.date):'—'}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-cut="${b.id}">${svg(ICN.check,13)} Mark Cut</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.check,30)}<div>Nothing waiting to cut.</div></div></td></tr>`}</tbody></table></div></div>`;
     } else if(tab==='send'){
+      const tkey=this.state.tSort||'vendor',tdir=this.state.tDir==='desc'?-1:1;
+      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'check':return b.checkNumber||'';default:return (b.vendor||'').toLowerCase();}};
+      const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
+      const rows=toSend.slice().sort((a,b)=>{const x=tval(a),y=tval(b);return (x<y?-1:x>y?1:a.id-b.id)*tdir;});
       body=`<div class="card"><div class="card-h"><h3>To Send</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Cut by</th><th class="r"></th></tr></thead>
-      <tbody>${toSend.length?toSend.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Send</button>`:''}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to send. Cut checks land here (also in Tracking).</div></div></td></tr>`}</tbody></table></div></div>`;
+      <div class="tablewrap"><table><thead><tr>${th('vendor','Vendor')}${th('account','Account')}${th('amount','Amount','r')}${th('check','Check #')}<th>Cut by</th><th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Send</button>`:''}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to send. Cut checks land here (also in Tracking).</div></div></td></tr>`}</tbody></table></div></div>`;
     } else {
       const byStore={};toDep.forEach(ch=>{(byStore[ch.account]=byStore[ch.account]||[]).push(ch);});
       const blocks=Object.keys(byStore).sort().map(store=>{const list=byStore[store];return `<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Store ${store}</h3><span class="sub">${list.length} check${list.length!==1?'s':''} · ${money(sum(list))}</span></div>
@@ -924,26 +948,42 @@ const App={
   v_tracking(){
     const toSend=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&b.checkStage==='send');
     const transit=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&b.checkStage==='transit');
-    const delivered=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&b.checkStage==='delivered').slice().sort((a,b)=>((b.delivered&&b.delivered.date)||'').localeCompare((a.delivered&&a.delivered.date)||''));
+    const delivered=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&b.checkStage==='delivered');
     const proc=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'));
-    // vendor readiness: ready (to send) vs not ready (still printing/cutting)
+    const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
+    const tab=this.state.trackTab||'send';
+    // vendor readiness (still shown on the To-send tab)
     const vr={};[...toSend,...proc].forEach(b=>{vr[b.vendor]=vr[b.vendor]||{ready:0,proc:0};if(b.checkStage==='send')vr[b.vendor].ready++;else vr[b.vendor].proc++;});
     const readiness=Object.entries(vr).sort((a,b)=>b[1].ready-a[1].ready);
-    const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
-    return `
-    ${(can('record')||can('create'))?`<div class="filters" style="margin-bottom:14px"><span style="color:var(--ink-3);font-size:13px">Got a USPS Click-N-Ship confirmation? Pull its tracking numbers in automatically.</span><div style="margin-left:auto"><input type="file" id="uspsfile" accept="application/pdf" style="display:none" onchange="App.importUspsPdf(this.files[0])"><button class="btn btn-gold btn-sm" onclick="document.getElementById('uspsfile').value='';document.getElementById('uspsfile').click()">${svg(ICN.truck,14)} Import USPS PDF</button></div></div>`:''}
-    ${readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready</span></div>
-      <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span>${v.ready?`<span class="badge b-amber" style="font-size:9px;padding:1px 7px">${v.ready} ready to send</span>`:''}${v.proc?`<span class="badge b-gray" style="font-size:9px;padding:1px 7px">${v.proc} not printed/cut yet — not ready</span>`:'<span class="badge b-green" style="font-size:9px;padding:1px 7px">all ready</span>'}</div>`).join('')}</div></div>`:''}
-    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>To be sent out</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Batch</th><th>Date sent</th><th class="r"></th></tr></thead>
-      <tbody>${toSend.length?toSend.map(b=>`<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td onclick="event.stopPropagation()"><input type="date" id="snt_${b.id}" value="${b.sent&&b.sent.date?b.sent.date:todayISO}" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;background:var(--surface)"></td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Mark Sent</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to mail. Cut checks land here.</div></div></td></tr>`}</tbody></table></div>
-    </div>
-    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>On the way</h3><span class="sub">${transit.length} · add USPS tracking #, then delivered date</span></div>
-      <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Tracking #</th><th>Sent</th><th class="r"></th></tr></thead>
-      <tbody>${transit.length?transit.map(b=>{const d=b.sent?daysUntil(b.sent.date):null;const overdue=!(b.sent&&b.sent.tracking)&&d!==null&&d<=-2;const noTrack=!(b.sent&&b.sent.tracking);return `<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${(b.sent&&b.sent.tracking)?b.sent.tracking:(overdue?'<span class="badge b-red" style="font-size:9px;padding:1px 6px">missing &gt;1d</span>':'<span class="badge b-amber" style="font-size:9px;padding:1px 6px">needed</span>')}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${b.sent?fmtD(b.sent.date)+' · '+b.sent.initials:'—'}</td><td class="r" style="white-space:nowrap">${(can('record')||can('create'))?`<button class="btn btn-ghost btn-sm" data-track="${b.id}">${svg(ICN.truck,13)} ${noTrack?'Tracking #':'Edit #'}</button> <button class="btn btn-gold btn-sm" data-delivered="${b.id}">${svg(ICN.check,13)} Delivered</button>`:''}</td></tr>`;}).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing in transit.</div></div></td></tr>`}</tbody></table></div>
-    </div>
-    ${delivered.length?`<div class="card"><div class="card-h"><h3>Payment delivered</h3><span class="sub">${delivered.length}</span></div><div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Tracking #</th><th>Delivered</th></tr></thead><tbody>${delivered.map(b=>`<tr class="click" data-bill="${b.id}"><td>${b.vendor}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${(b.sent&&b.sent.tracking)||'—'}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${b.delivered?fmtD(b.delivered.date)+' · '+b.delivered.initials:'—'}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
+    // sort helper for tracking tables
+    const tkey=this.state.tSort||'vendor', tdir=this.state.tDir==='desc'?-1:1;
+    const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'check':return b.checkNumber||'';case 'sent':return (b.sent&&b.sent.date)||'';case 'tracking':return (b.sent&&b.sent.tracking)||'';case 'delivered':return (b.delivered&&b.delivered.date)||'';default:return (b.vendor||'').toLowerCase();}};
+    const tsort=arr=>arr.slice().sort((a,b)=>{const x=tval(a),y=tval(b);if(x<y)return -1*tdir;if(x>y)return 1*tdir;return (a.id-b.id)*tdir;});
+    const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
+    const tabs=[['send','To be sent out',toSend.length],['transit','On the way',transit.length],['delivered','Delivered',delivered.length]];
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-tracktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}${(can('record')||can('create'))?`<div style="margin-left:auto"><input type="file" id="uspsfile" accept="application/pdf" style="display:none" onchange="App.importUspsPdf(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('uspsfile').value='';document.getElementById('uspsfile').click()">${svg(ICN.truck,14)} Import USPS PDF</button></div>`:''}</div>`;
+    let body='';
+    if(tab==='send'){
+      const rows=tsort(toSend);
+      body=`${readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready</span></div>
+        <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span>${v.ready?`<span class="badge b-amber" style="font-size:9px;padding:1px 7px">${v.ready} ready to send</span>`:''}${v.proc?`<span class="badge b-gray" style="font-size:9px;padding:1px 7px">${v.proc} not printed/cut yet</span>`:'<span class="badge b-green" style="font-size:9px;padding:1px 7px">all ready</span>'}</div>`).join('')}</div></div>`:''}
+      <div class="card"><div class="card-h"><h3>To be sent out</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
+        <div class="tablewrap"><table><thead><tr>${th('vendor','Vendor')}${th('account','Account')}${th('amount','Amount','r')}${th('check','Check #')}<th>Batch</th><th>Date sent</th><th class="r"></th></tr></thead>
+        <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td onclick="event.stopPropagation()"><input type="date" id="snt_${b.id}" value="${b.sent&&b.sent.date?b.sent.date:todayISO}" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;background:var(--surface)"></td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Mark Sent</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to mail. Cut checks land here.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else if(tab==='transit'){
+      const rows=tsort(transit);
+      body=`<div class="card"><div class="card-h"><h3>On the way</h3><span class="sub">${transit.length} · add USPS tracking #, then delivered date</span></div>
+        <div class="tablewrap"><table><thead><tr>${th('vendor','Vendor')}${th('account','Account')}${th('amount','Amount','r')}${th('check','Check #')}${th('tracking','Tracking #')}${th('sent','Sent')}<th class="r"></th></tr></thead>
+        <tbody>${rows.length?rows.map(b=>{const d=b.sent?daysUntil(b.sent.date):null;const overdue=!(b.sent&&b.sent.tracking)&&d!==null&&d<=-2;const noTrack=!(b.sent&&b.sent.tracking);return `<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${(b.sent&&b.sent.tracking)?b.sent.tracking:(overdue?'<span class="badge b-red" style="font-size:9px;padding:1px 6px">missing &gt;1d</span>':'<span class="badge b-amber" style="font-size:9px;padding:1px 6px">needed</span>')}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${b.sent?fmtD(b.sent.date)+' · '+b.sent.initials:'—'}</td><td class="r" style="white-space:nowrap">${(can('record')||can('create'))?`<button class="btn btn-ghost btn-sm" data-track="${b.id}">${svg(ICN.truck,13)} ${noTrack?'Tracking #':'Edit #'}</button> <button class="btn btn-gold btn-sm" data-delivered="${b.id}">${svg(ICN.check,13)} Delivered</button>`:''}</td></tr>`;}).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing in transit.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else {
+      const rows=tsort(delivered);
+      body=`<div class="card"><div class="card-h"><h3>Payment delivered</h3><span class="sub">${delivered.length}</span></div>
+        <div class="tablewrap"><table><thead><tr>${th('vendor','Vendor')}${th('account','Account')}${th('amount','Amount','r')}${th('check','Check #')}${th('tracking','Tracking #')}${th('delivered','Delivered')}</tr></thead>
+        <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td>${b.vendor}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${(b.sent&&b.sent.tracking)||'—'}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${b.delivered?fmtD(b.delivered.date)+' · '+b.delivered.initials:'—'}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.check,30)}<div>Nothing delivered yet.</div></div></td></tr>`}</tbody></table></div></div>`;
+    }
+    return tabBar+body;
   },
+  tsort(k){if(this.state.tSort===k){this.state.tDir=this.state.tDir==='asc'?'desc':'asc';}else{this.state.tSort=k;this.state.tDir=(k==='amount'||k==='sent'||k==='delivered')?'desc':'asc';}this.render();},
 
   /* ---------- VENDORS ---------- */
   // ===== EOM Tracker =====
@@ -973,7 +1013,10 @@ const App={
     const monthTotal=rows.reduce((s,r)=>s+r.total,0);
     const pct=totVendors?Math.round(100*fullyDone/totVendors):0;
     if(onlyMissing)rows=rows.filter(r=>r.missing>0);
-    rows.sort((a,b)=>b.missing-a.missing||b.total-a.total);
+    const ek=this.state.eSort||'missing', edir=this.state.eDir==='asc'?1:(this.state.eDir==='desc'?-1:-1);
+    const eval2=r=>{switch(ek){case 'vendor':return (r.vendor||'').toLowerCase();case 'freq':return (r.freq||'').toLowerCase();case 'present':return r.present;case 'expected':return r.expected;case 'total':return r.total;case 'progress':return r.complete;case 'lastpaid':return r.lastPaid||'';default:return r.missing;}};
+    rows.sort((a,b)=>{const x=eval2(a),y=eval2(b);if(x<y)return -1*edir;if(x>y)return 1*edir;return b.missing-a.missing||b.total-a.total;});
+    const eth=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.eomSort('${k}')">${l}${ek===k?(edir===1?' ▲':' ▼'):''}</th>`;
     const monthOpts=this.eomMonths().map(m=>`<option value="${m}"${m===mk?' selected':''}>${this.monthLabel(m)}</option>`).join('');
     return `
     <div class="filters" style="flex-wrap:wrap;gap:10px;align-items:center">
@@ -986,11 +1029,17 @@ const App={
       <div class="eom-card ${totalMissing?'warn':''}"><div class="ec-label">Missing entries</div><div class="ec-big">${totalMissing}</div><div class="ec-sub">across ${rows.filter(r=>r.missing>0).length||0} vendors</div></div>
       <div class="eom-card"><div class="ec-label">Recorded this month</div><div class="ec-big" style="font-size:22px">${money(monthTotal)}</div><div class="ec-sub">${this.monthLabel(mk)}</div></div>
     </div>
-    <div class="card"><div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Frequency</th><th class="r">Present</th><th class="r">Expected</th><th class="r">Missing</th><th>Progress</th><th class="r">Total</th><th>Last paid</th></tr></thead>
+    <div class="card"><div class="tablewrap"><table><thead><tr>${eth('vendor','Vendor')}${eth('freq','Frequency')}${eth('present','Present','r')}${eth('expected','Expected','r')}${eth('missing','Missing','r')}${eth('progress','Progress')}${eth('total','Total','r')}${eth('lastpaid','Last paid')}</tr></thead>
       <tbody>${rows.length?rows.map(r=>{const c=Math.round(r.complete*100);const col=r.missing===0?'var(--green)':(r.present===0?'var(--red)':'var(--gold)');return `<tr><td><b>${r.vendor}</b></td><td style="font-size:12.5px;color:var(--ink-2)">${r.freq}</td><td class="r mono">${r.present}</td><td class="r mono" style="color:var(--ink-3)">${r.expected}</td><td class="r mono" style="font-weight:700;color:${r.missing?'var(--red)':'var(--ink-3)'}">${r.missing||'—'}</td><td><div class="eom-bar"><div style="width:${c}%;background:${col}"></div></div></td><td class="r mono" style="font-weight:600">${r.total?money(r.total):'—'}</td><td style="font-size:12px;color:var(--ink-2);white-space:nowrap">${r.lastPaid?fmtD(r.lastPaid):'<span style="color:var(--red)">never</span>'}</td></tr>`}).join(''):`<tr><td colspan="8"><div class="empty">${svg(ICN.check,28)}<div>Nothing missing this month.</div></div></td></tr>`}</tbody>
     </table></div></div>`;
   },
   eomSet(k,v){if(k==='month')this.state.eomMonth=v;if(k==='missing')this.state.eomMissing=v;this.render();},
+  eomSort(k){if(this.state.eSort===k){this.state.eDir=this.state.eDir==='asc'?'desc':'asc';}else{this.state.eSort=k;this.state.eDir=(k==='vendor'||k==='freq')?'asc':'desc';}this.render();},
+  // ---- generic sortable-table helper (used by Approvals, Payments-pending, Pickups, Users, Deleted) ----
+  // ns = a unique namespace per table so each remembers its own sort. valFns maps key→(row)=>value.
+  gsort(ns,k,defDesc){const sk=ns+'Sort',dk=ns+'Dir';if(this.state[sk]===k){this.state[dk]=this.state[dk]==='asc'?'desc':'asc';}else{this.state[sk]=k;this.state[dk]=defDesc&&defDesc.includes(k)?'desc':'asc';}this.render();},
+  gh(ns,k,label,cls){const sk=this.state[ns+'Sort'],dk=this.state[ns+'Dir']==='desc'?' ▼':' ▲';return `<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.gsort('${ns}','${k}')">${label}${sk===k?dk:''}</th>`;},
+  gsortRows(ns,rows,valFns,fallbackKey){const k=this.state[ns+'Sort']||fallbackKey,dir=this.state[ns+'Dir']==='desc'?-1:1,vf=valFns[k]||valFns[fallbackKey];if(!vf)return rows;return rows.slice().sort((a,b)=>{const x=vf(a),y=vf(b);if(x<y)return -1*dir;if(x>y)return 1*dir;return ((a.id||0)-(b.id||0))*dir;});},
 
   v_vendors(){
     const q=(this.state.q||'').toLowerCase();
@@ -1068,11 +1117,14 @@ const App={
   v_accounts(){
     const at=c=>BILLS.filter(b=>b.account===c);
     const stores=ACCOUNTS.filter(a=>a.type==='store'),ents=ACCOUNTS.filter(a=>a.type==='entity');
-    const row=a=>{const bs=at(a.code);const open=bs.filter(b=>!b.isChase&&b.stage!=='rejected'&&!(b.paid||b.delivered)).length;return `<tr class="click" onclick="App.go('bills');App.state.q='${String(a.code).replace(/'/g,"\\'")}';App.render()"><td><div style="display:flex;align-items:center;gap:10px"><div class="vlogo" style="width:30px;height:30px;font-size:11px;border-radius:8px">${a.code.slice(0,3)}</div><b>${a.code}</b>${a.name&&a.name!==a.code?`<span style="color:var(--ink-3);font-size:12px">${a.name}</span>`:''}</div></td><td class="r mono">${bs.length}</td><td class="r mono" style="color:var(--ink-2)">${open||'—'}</td><td class="r mono" style="font-weight:700">${bs.length?money(bs.reduce((s,b)=>s+(+b.amount||0),0)):'—'}</td></tr>`};
-    const tbl=(list)=>`<div class="card" style="margin-bottom:20px"><div class="tablewrap"><table><thead><tr><th>Code</th><th class="r">Bills</th><th class="r">Open</th><th class="r">Total</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>`;
+    const openOf=a=>at(a.code).filter(b=>!b.isChase&&b.stage!=='rejected'&&!(b.paid||b.delivered)).length;
+    const totOf=a=>at(a.code).reduce((s,b)=>s+(+b.amount||0),0);
+    const vf={code:a=>String(a.code).toLowerCase(),bills:a=>at(a.code).length,open:a=>openOf(a),total:a=>totOf(a)};
+    const row=a=>{const bs=at(a.code);const open=openOf(a);return `<tr class="click" onclick="App.go('bills');App.state.q='${String(a.code).replace(/'/g,"\\'")}';App.render()"><td><div style="display:flex;align-items:center;gap:10px"><div class="vlogo" style="width:30px;height:30px;font-size:11px;border-radius:8px">${a.code.slice(0,3)}</div><b>${a.code}</b>${a.name&&a.name!==a.code?`<span style="color:var(--ink-3);font-size:12px">${a.name}</span>`:''}</div></td><td class="r mono">${bs.length}</td><td class="r mono" style="color:var(--ink-2)">${open||'—'}</td><td class="r mono" style="font-weight:700">${bs.length?money(totOf(a)):'—'}</td></tr>`};
+    const tbl=(ns,list)=>{const rows=this.gsortRows(ns,list,vf,'code');return `<div class="card" style="margin-bottom:20px"><div class="tablewrap"><table><thead><tr>${this.gh(ns,'code','Code')}${this.gh(ns,'bills','Bills','r')}${this.gh(ns,'open','Open','r')}${this.gh(ns,'total','Total','r')}</tr></thead><tbody>${rows.map(row).join('')}</tbody></table></div></div>`;};
     return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto">${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div></div>
-      <div class="section-title">Entities</div>${tbl(ents)}
-      <div class="section-title">Stores (${stores.length})</div>${tbl(stores)}`;
+      <div class="section-title">Entities</div>${tbl('accE',ents)}
+      <div class="section-title">Stores (${stores.length})</div>${tbl('accS',stores)}`;
   },
   downloadBackup(){
     if(CURRENT.role!=='admin')return;
@@ -1135,10 +1187,12 @@ const App={
 
   /* ---------- USERS ---------- */
   v_users(){
+    const vf={initials:u=>(u.initials||'').toLowerCase(),name:u=>(u.name||'').toLowerCase(),u:u=>(u.u||'').toLowerCase(),role:u=>(ROLES[u.role]||'').toLowerCase(),tier:u=>u.role==='admin'?99:userTier(u),training:u=>u.inTraining?1:0};
+    const rows=this.gsortRows('usr',USERS,vf,'name');
     return `
     <div class="filters"><span style="color:var(--ink-3);font-size:13px">${USERS.length} user${USERS.length!==1?'s':''}</span><div style="margin-left:auto"><button class="btn btn-gold btn-sm" data-adduser>${svg(ICN.plus,14)} Add user</button></div></div>
-    <div class="card"><div class="tablewrap"><table><thead><tr><th>Initials</th><th>Name</th><th>Username</th><th>Role</th><th>Tier</th><th>Training</th><th class="r"></th></tr></thead>
-      <tbody>${USERS.map(u=>`<tr><td><div class="avatar" style="width:30px;height:30px;font-size:11px">${u.initials}</div></td><td style="font-weight:600">${u.name}</td><td class="mono">${u.u}</td><td><span class="badge ${u.role==='admin'?'b-violet':u.role==='ap'?'b-blue':u.role==='approver'?'b-amber':u.role==='frontdesk'?'b-green':'b-gray'}"><span class="dot"></span>${ROLES[u.role]}</span></td><td style="font-size:12px">${u.role==='admin'?'<b>All</b>':'<span class="mono">T'+userTier(u)+'</span> <span style="color:var(--ink-3)">'+TIER_LABEL[userTier(u)]+'</span>'}</td><td>${u.inTraining?'<span class="badge b-amber"><span class="dot"></span>In training</span>':'<span style="color:var(--ink-3);font-size:12px">—</span>'}</td><td class="r"><button class="btn btn-ghost btn-sm" data-edituser="${u.u}">${svg(ICN.edit,13)} Edit</button>${u.u!==CURRENT.u?` <button class="btn btn-ghost btn-sm" data-deluser="${u.u}">${svg(ICN.trash,13)}</button>`:''}</td></tr>`).join('')}</tbody>
+    <div class="card"><div class="tablewrap"><table><thead><tr>${this.gh('usr','initials','Initials')}${this.gh('usr','name','Name')}${this.gh('usr','u','Username')}${this.gh('usr','role','Role')}${this.gh('usr','tier','Tier')}${this.gh('usr','training','Training')}<th class="r"></th></tr></thead>
+      <tbody>${rows.map(u=>`<tr><td><div class="avatar" style="width:30px;height:30px;font-size:11px">${u.initials}</div></td><td style="font-weight:600">${u.name}</td><td class="mono">${u.u}</td><td><span class="badge ${u.role==='admin'?'b-violet':u.role==='ap'?'b-blue':u.role==='approver'?'b-amber':u.role==='frontdesk'?'b-green':'b-gray'}"><span class="dot"></span>${ROLES[u.role]}</span></td><td style="font-size:12px">${u.role==='admin'?'<b>All</b>':'<span class="mono">T'+userTier(u)+'</span> <span style="color:var(--ink-3)">'+TIER_LABEL[userTier(u)]+'</span>'}</td><td>${u.inTraining?'<span class="badge b-amber"><span class="dot"></span>In training</span>':'<span style="color:var(--ink-3);font-size:12px">—</span>'}</td><td class="r"><button class="btn btn-ghost btn-sm" data-edituser="${u.u}">${svg(ICN.edit,13)} Edit</button>${u.u!==CURRENT.u?` <button class="btn btn-ghost btn-sm" data-deluser="${u.u}">${svg(ICN.trash,13)}</button>`:''}</td></tr>`).join('')}</tbody>
     </table></div></div>
     <p style="font-size:12px;color:var(--ink-3);margin-top:14px;display:flex;gap:7px;align-items:flex-start">${svg(ICN.bolt,13)}<span>Add staff with the right hat — <b>Data Entry</b> logs bills, <b>Approver</b> signs off, <b>Accounts Payable</b> records payments, <b>Front Desk</b> marks pickups. <b>In training</b> users' entries go to <b>Pending Submission</b> for anyone to approve. Each person's <b>initials</b> tag what they touch.</span></p>`;
   },
@@ -1154,6 +1208,10 @@ const App={
     v.querySelectorAll('[data-month]').forEach(s=>s.onchange=()=>{this.state.month=s.value;this.render()});
     v.querySelectorAll('[data-sort]').forEach(h=>h.onclick=()=>this.setSort(h.dataset.sort));
     v.querySelectorAll('[data-checktab]').forEach(b=>b.onclick=()=>{this.state.checkTab=b.dataset.checktab;this.render()});
+    v.querySelectorAll('[data-tracktab]').forEach(b=>b.onclick=()=>{this.state.trackTab=b.dataset.tracktab;this.render()});
+    v.querySelectorAll('[data-apprtab]').forEach(b=>b.onclick=()=>{this.state.apprTab=b.dataset.apprtab;this.render()});
+    v.querySelectorAll('[data-picktab]').forEach(b=>b.onclick=()=>{this.state.pickTab=b.dataset.picktab;this.render()});
+    v.querySelectorAll('[data-deltab]').forEach(b=>b.onclick=()=>{this.state.delTab=b.dataset.deltab;this.render()});
     v.querySelectorAll('[data-acct-set]').forEach(el=>el.onclick=e=>{e.stopPropagation();this.state.acct=el.dataset.acctSet;this.go('bills')});
     v.querySelectorAll('[data-bill]').forEach(el=>el.onclick=e=>{if(e.target.closest('button')||e.target.closest('a'))return;this.openBill(el.dataset.bill)});
     v.querySelectorAll('[data-new]').forEach(b=>b.onclick=()=>this.openCreate());
@@ -1774,14 +1832,22 @@ const App={
   v_deleted(){
     if(CURRENT.role!=='admin')return `<div class="card"><div class="empty">${svg(ICN.trash,30)}<div>Admins only.</div></div></div>`;
     const bills=DELETED.bills,vends=DELETED.vendors;
-    return `
-    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Deleted bills</h3><span class="sub">${bills.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>ID</th><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Deleted</th><th class="r"></th></tr></thead>
-      <tbody>${bills.length?bills.map(b=>`<tr><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px;color:var(--ink-3)">${b._deletedAt?fmtDT(b._deletedAt):'—'}${b._deletedBy?' · '+b._deletedBy:''}</td><td class="r"><button class="btn btn-ghost btn-sm" data-restorebill="${b.id}">${svg(ICN.arrow,13)} Restore</button></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.trash,30)}<div>No deleted bills.</div></div></td></tr>`}</tbody></table></div></div>
-    <div class="card"><div class="card-h"><h3>Deleted vendors</h3><span class="sub">${vends.length}</span></div>
-      <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Default method</th><th>Deleted</th><th class="r"></th></tr></thead>
-      <tbody>${vends.length?vends.map(v=>`<tr><td><div class="vendorcell"><div class="vlogo">${abbr(v.n)}</div><div class="vmeta"><b>${v.n}</b></div></div></td><td style="font-size:12.5px">${v.m||'—'}</td><td class="mono" style="font-size:12px;color:var(--ink-3)">${v._deletedAt?fmtDT(v._deletedAt):'—'}${v._deletedBy?' · '+v._deletedBy:''}</td><td class="r"><button class="btn btn-ghost btn-sm" data-restorevendor="${v.n.replace(/"/g,'&quot;')}">${svg(ICN.arrow,13)} Restore</button></td></tr>`).join(''):`<tr><td colspan="4"><div class="empty">${svg(ICN.trash,30)}<div>No deleted vendors.</div></div></td></tr>`}</tbody></table></div></div>
-    <p style="font-size:12px;color:var(--ink-3);margin-top:14px;display:flex;gap:7px;align-items:flex-start">${svg(ICN.bolt,13)}<span>Deleting moves items here instead of erasing them. Restore puts them back exactly as they were. Only admins can delete or restore.</span></p>`;
+    const tab=this.state.delTab||'bills';
+    const tabs=[['bills','Deleted bills',bills.length],['vendors','Deleted vendors',vends.length]];
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-deltab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}</div>`;
+    let body='';
+    if(tab==='bills'){
+      const rows=this.gsortRows('delB',bills,{id:b=>b.id,vendor:b=>(b.vendor||'').toLowerCase(),account:b=>b.account||'',amount:b=>+b.amount||0,deleted:b=>b._deletedAt||''},'deleted');
+      body=`<div class="card"><div class="card-h"><h3>Deleted bills</h3><span class="sub">${bills.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('delB','id','ID')}${this.gh('delB','vendor','Vendor')}${this.gh('delB','account','Account')}${this.gh('delB','amount','Amount','r')}${this.gh('delB','deleted','Deleted')}<th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td class="mono" style="font-size:12px;color:var(--ink-3)">${b._deletedAt?fmtDT(b._deletedAt):'—'}${b._deletedBy?' · '+b._deletedBy:''}</td><td class="r"><button class="btn btn-ghost btn-sm" data-restorebill="${b.id}">${svg(ICN.arrow,13)} Restore</button></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.trash,30)}<div>No deleted bills.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else {
+      const rows=this.gsortRows('delV',vends,{vendor:v=>(v.n||'').toLowerCase(),method:v=>(v.m||'').toLowerCase(),deleted:v=>v._deletedAt||''},'deleted');
+      body=`<div class="card"><div class="card-h"><h3>Deleted vendors</h3><span class="sub">${vends.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('delV','vendor','Vendor')}${this.gh('delV','method','Default method')}${this.gh('delV','deleted','Deleted')}<th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(v=>`<tr><td><div class="vendorcell"><div class="vlogo">${abbr(v.n)}</div><div class="vmeta"><b>${v.n}</b></div></div></td><td style="font-size:12.5px">${v.m||'—'}</td><td class="mono" style="font-size:12px;color:var(--ink-3)">${v._deletedAt?fmtDT(v._deletedAt):'—'}${v._deletedBy?' · '+v._deletedBy:''}</td><td class="r"><button class="btn btn-ghost btn-sm" data-restorevendor="${v.n.replace(/"/g,'&quot;')}">${svg(ICN.arrow,13)} Restore</button></td></tr>`).join(''):`<tr><td colspan="4"><div class="empty">${svg(ICN.trash,30)}<div>No deleted vendors.</div></div></td></tr>`}</tbody></table></div></div>`;
+    }
+    return tabBar+body+`<p style="font-size:12px;color:var(--ink-3);margin-top:14px;display:flex;gap:7px;align-items:flex-start">${svg(ICN.bolt,13)}<span>Deleting moves items here instead of erasing them. Restore puts them back exactly as they were. Only admins can delete or restore.</span></p>`;
   },
   entryRecalc(){const g=id=>document.getElementById(id);
     const due=g('f_due')?mdyToISO(g('f_due').value):'';const sb=g('f_sendby');
