@@ -1047,13 +1047,49 @@ const App={
     const at=c=>BILLS.filter(b=>b.account===c);
     const stores=ACCOUNTS.filter(a=>a.type==='store'),ents=ACCOUNTS.filter(a=>a.type==='entity');
     const card=a=>{const bs=at(a.code);return `<div class="ent-card"><div class="ent-top"><div class="ent-code">${a.code}</div></div><div class="nm">&nbsp;</div><div class="ent-stat"><div class="open"><b>${bs.length}</b><span>bills</span></div><div style="text-align:right"><div class="mono" style="font-weight:700">${bs.length?money(bs.reduce((s,b)=>s+b.amount,0)):'—'}</div><div style="font-size:10.5px;color:var(--ink-3)">total</div></div></div></div>`};
-    return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto;display:flex;gap:8px">${CURRENT.role==='admin'?`<input type="file" id="histfile" accept="application/json" style="display:none" onchange="App.importHistory(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.arrow,14)} Import history (JSON)</button>`:''}</div></div><div class="section-title">Entities</div><div class="ent-grid" style="margin-bottom:24px">${ents.map(card).join('')}</div><div class="section-title">Stores (${stores.length})</div><div class="ent-grid">${stores.map(card).join('')}</div>`;
+    return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto;display:flex;gap:8px">${CURRENT.role==='admin'?`<button class="btn btn-gold btn-sm" onclick="App.downloadBackup()">${svg(ICN.arrow,14)} Download backup</button><input type="file" id="histfile" accept="application/json" style="display:none" onchange="App.importHistory(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.arrow,14)} Import / restore (JSON)</button>`:''}</div></div><div class="section-title">Entities</div><div class="ent-grid" style="margin-bottom:24px">${ents.map(card).join('')}</div><div class="section-title">Stores (${stores.length})</div><div class="ent-grid">${stores.map(card).join('')}</div>`;
+  },
+  downloadBackup(){
+    if(CURRENT.role!=='admin')return;
+    const payload={
+      _backup:'captain-jays-ap-hub',
+      _exportedAt:new Date().toISOString(),
+      _by:CURRENT.u,
+      bills:BILLS,
+      vendors:VENDORS,
+      audit:AUDIT,
+      deleted:DELETED,
+      users:USERS,           // names/roles/perms only — never passwords (those live server-side)
+      nextId:nextId,
+    };
+    const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    const stamp=new Date().toISOString().slice(0,10);
+    a.href=url;a.download='captain-jays-backup-'+stamp+'.json';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    this.log('Downloaded backup',BILLS.length+' bills · '+VENDORS.length+' vendors');
+    this.toast('Backup downloaded · '+BILLS.length+' bills');
   },
   importHistory(file){
     if(!file||CURRENT.role!=='admin')return;
     const rd=new FileReader();
     rd.onload=()=>{
       let data;try{data=JSON.parse(rd.result);}catch(e){this.toast('That file isn\'t valid JSON');return;}
+      // full backup file → offer a complete restore (replaces everything)
+      if(data&&data._backup==='captain-jays-ap-hub'&&Array.isArray(data.bills)){
+        const when=data._exportedAt?(' from '+data._exportedAt.slice(0,10)):'';
+        if(confirm('This is a full backup'+when+' with '+data.bills.length+' bills and '+((data.vendors||[]).length)+' vendors.\n\nOK = RESTORE everything (replaces current bills, vendors & audit).\nCancel = just merge the bills in.')){
+          BILLS=data.bills;
+          if(Array.isArray(data.vendors)&&data.vendors.length)VENDORS=data.vendors;
+          if(Array.isArray(data.audit))AUDIT=data.audit;
+          if(data.deleted&&typeof data.deleted==='object')DELETED=data.deleted;
+          if(data.nextId)nextId=data.nextId;
+          this.log('Restored from backup',data.bills.length+' bills'+when);
+          this.persist();this.toast('Restored '+data.bills.length+' bills from backup');this.render();return;
+        }
+      }
       const incoming=Array.isArray(data)?data:(data.bills||[]);
       if(!incoming.length){this.toast('No bills found in that file');return;}
       const byId=new Map(BILLS.map(b=>[b.id,b]));
@@ -1528,58 +1564,74 @@ const App={
     return out;
   },
   // match a USPS recipient name to a vendor that has an in-transit (or sent) check
+  // bills currently awaiting a tracking number, grouped by vendor
+  uspsCandBills(){return BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='transit'||b.checkStage==='send'));},
+  uspsVendorsList(){return [...new Set(this.uspsCandBills().map(b=>b.vendor))].sort();},
   matchUspsVendor(recipient){
     if(!recipient)return null;
     const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(llc|inc|co|corp|distributors|company|the)\b/g,'').replace(/\s+/g,' ').trim();
     const rn=norm(recipient);if(!rn)return null;
-    const cands=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='transit'||b.checkStage==='send'));
     let best=null,bs=0;
-    cands.forEach(b=>{const vn=norm(b.vendor);if(!vn)return;
-      const rt=new Set(rn.split(' ')),vt=new Set(vn.split(' '));let inter=0;rt.forEach(x=>{if(vt.has(x))inter++;});
+    this.uspsVendorsList().forEach(vn=>{const vnn=norm(vn);if(!vnn)return;
+      const rt=new Set(rn.split(' ')),vt=new Set(vnn.split(' '));let inter=0;rt.forEach(x=>{if(vt.has(x))inter++;});
       const score=inter/Math.max(rt.size,vt.size);
-      if(score>bs){bs=score;best=b;}
+      if(score>bs){bs=score;best=vn;}
     });
-    return bs>=0.34?best:null;
+    return bs>=0.34?best:null;  // returns a VENDOR NAME (one tracking → all its checks)
   },
   openUspsReview(shipments){
-    this._usps=shipments.map((s,i)=>{const b=this.matchUspsVendor(s.recipient);return {...s,billId:b?b.id:null,include:!!b,idx:i};});
+    this._usps=shipments.map((s,i)=>{const v=this.matchUspsVendor(s.recipient);return {...s,vendor:v||'',include:!!v,idx:i};});
     this.renderUspsReview();
   },
   renderUspsReview(){
     const rows=this._usps;
-    const billSent=x=>(x.sent&&x.sent.date)?fmtD(x.sent.date):'not sent';
-    const opts=b=>BILLS.filter(x=>!x.isChase&&x.payType==='check'&&(x.checkStage==='transit'||x.checkStage==='send')).map(x=>`<option value="${x.id}" ${b===x.id?'selected':''}>${x.vendor} · ${x.account} · ${money(x.amount)} · sent ${billSent(x)}${(x.sent&&x.sent.tracking)?' · has #':''}</option>`).join('');
-    const body=rows.map(r=>`<div style="border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:10px;${r.include?'':'opacity:.55'}">
+    const billsFor=v=>this.uspsCandBills().filter(b=>b.vendor===v);
+    // the checks this shipment actually covers = same vendor AND same sent date (one envelope = one day)
+    const sentOf=b=>(b.sent&&b.sent.date)||'';
+    const billsForGroup=(v,date)=>this.uspsCandBills().filter(b=>b.vendor===v&&(!date||sentOf(b)===date||!sentOf(b)));
+    const vendorOpts=sel=>this.uspsVendorsList().map(v=>{const n=billsFor(v).length;return `<option value="${v.replace(/"/g,'&quot;')}" ${sel===v?'selected':''}>${v} · ${n} check${n!==1?'s':''}</option>`;}).join('');
+    const body=rows.map(r=>{const bl=r.vendor?billsForGroup(r.vendor,r.sentDate):[];
+      const others=r.vendor?billsFor(r.vendor).filter(b=>!bl.includes(b)):[];
+      return `<div style="border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:10px;${r.include?'':'opacity:.55'}">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
         <input type="checkbox" ${r.include?'checked':''} onchange="App.uspsSet(${r.idx},'include',this.checked)" style="width:16px;height:16px">
         <b style="flex:1;font-size:13px">${r.recipient||'(unknown recipient)'}</b>
         ${r.sentDate?`<span style="font-size:11px;color:var(--ink-2)">sent ${fmtD(r.sentDate)}</span>`:(r.deliveryDate?`<span style="font-size:11px;color:var(--ink-3)">est. ${fmtD(r.deliveryDate)}</span>`:'')}
       </div>
       <div class="field" style="margin-bottom:8px"><label style="font-size:11px">Tracking #</label><div class="inp" style="padding:0"><input value="${r.tracking}" onchange="App.uspsSet(${r.idx},'tracking',this.value)" class="mono" style="border:none;background:none;width:100%;font:inherit;font-size:12px;padding:8px 10px"></div></div>
-      <div class="field"><label style="font-size:11px">Apply to bill <span style="color:var(--ink-3)">· shows each bill's date sent</span></label><select class="selent" style="width:100%;font-size:12.5px" onchange="App.uspsSet(${r.idx},'billId',this.value?+this.value:null)"><option value="">— skip (no match) —</option>${opts(r.billId)}</select></div>
-      ${r.billId?(()=>{const bb=BILLS.find(x=>x.id===r.billId);const cur=bb&&bb.sent&&bb.sent.date;const willSet=r.sentDate&&(!cur);return (r.sentDate)?`<p style="font-size:11px;color:var(--ink-3);margin-top:6px">Date sent → <b style="color:var(--ink-2)">${fmtD(r.sentDate)}</b>${cur&&cur!==r.sentDate?' (bill currently '+fmtD(cur)+')':''}</p>`:'';})():''}
-    </div>`).join('');
-    const matched=rows.filter(r=>r.include&&r.billId).length;
+      <div class="field"><label style="font-size:11px">Apply to vendor <span style="color:var(--ink-3)">· covers checks sent the same day</span></label><select class="selent" style="width:100%;font-size:12.5px" onchange="App.uspsSet(${r.idx},'vendor',this.value||'')"><option value="">— skip (no match) —</option>${vendorOpts(r.vendor)}</select></div>
+      ${bl.length?`<div style="margin-top:8px;background:var(--surface-2);border-radius:8px;padding:8px 10px"><div style="font-size:11px;color:var(--ink-3);margin-bottom:4px">This tracking # applies to ${bl.length} check${bl.length!==1?'s':''} sent ${r.sentDate?fmtD(r.sentDate):'(same day)'}:</div>${bl.map(b=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span style="color:var(--ink-2)">${b.account} · ${invOf(b)}</span><span class="mono">${money(b.amount)}</span></div>`).join('')}</div>`:(r.vendor?`<p style="font-size:11px;color:var(--amber);margin-top:6px">No ${r.vendor} checks match the sent date ${r.sentDate?fmtD(r.sentDate):''}.</p>`:'')}
+      ${others.length?`<p style="font-size:10.5px;color:var(--ink-3);margin-top:6px">${others.length} other ${r.vendor} check${others.length!==1?'s were':' was'} sent on a different day — not covered by this tracking #.</p>`:''}
+    </div>`;}).join('');
+    const matched=rows.filter(r=>r.include&&r.vendor&&billsForGroup(r.vendor,r.sentDate).length).length;
+    const totalBills=rows.filter(r=>r.include&&r.vendor).reduce((s,r)=>s+billsForGroup(r.vendor,r.sentDate).length,0);
     this.openDrawerEl(`
-      <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px;background:var(--gold);color:var(--navy-900)">${svg(ICN.truck,18)}</div><div><div style="font-weight:700;font-size:15px">Review USPS tracking</div><div style="font-size:12.5px;color:var(--ink-3)">${rows.length} shipment${rows.length!==1?'s':''} found · ${matched} matched${rows[0]&&rows[0].sentDate?' · sent '+fmtD(rows[0].sentDate):''}</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
-      <div class="dr-body"><p style="font-size:12px;color:var(--ink-3);margin-bottom:12px">Confirm each tracking number and the bill it belongs to. The send date comes from the USPS order date. Untick any you don't want, fix the match, then apply.</p>${body}</div>
-      <div class="dr-foot"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.applyUsps()">${svg(ICN.check,15)} Apply ${matched} tracking #${matched!==1?'s':''}</button></div>`);
+      <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px;background:var(--gold);color:var(--navy-900)">${svg(ICN.truck,18)}</div><div><div style="font-weight:700;font-size:15px">Review USPS tracking</div><div style="font-size:12.5px;color:var(--ink-3)">${rows.length} shipment${rows.length!==1?'s':''} · ${matched} matched · ${totalBills} check${totalBills!==1?'s':''}</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
+      <div class="dr-body"><p style="font-size:12px;color:var(--ink-3);margin-bottom:12px">One envelope per vendor per day. A shipment's tracking # is applied to that vendor's checks <b>sent the same day</b>. Checks sent on a different day get their own (different) tracking #. Confirm and apply.</p>${body}</div>
+      <div class="dr-foot"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.applyUsps()">${svg(ICN.check,15)} Apply to ${totalBills} check${totalBills!==1?'s':''}</button></div>`);
   },
-  uspsSet(idx,key,val){const r=this._usps.find(x=>x.idx===idx);if(!r)return;r[key]=val;if(key==='billId'&&val)r.include=true;this.renderUspsReview();},
+  uspsSet(idx,key,val){const r=this._usps.find(x=>x.idx===idx);if(!r)return;r[key]=val;if(key==='vendor'&&val)r.include=true;this.renderUspsReview();},
   applyUsps(){
-    let n=0;
+    const sentOf=b=>(b.sent&&b.sent.date)||'';
+    let bills=0,ship=0;
     this._usps.forEach(r=>{
-      if(!r.include||!r.billId||!r.tracking)return;
-      const b=BILLS.find(x=>x.id===r.billId);if(!b)return;
-      const sentDate=r.sentDate||(b.sent&&b.sent.date)||todayISO;
-      if(!b.sent)b.sent={date:sentDate,by:CURRENT.u,initials:CURRENT.initials,tracking:''};
-      else if(r.sentDate)b.sent.date=r.sentDate;   // use the USPS order date as the send date
-      b.sent.tracking=r.tracking.replace(/\s/g,'');
-      if(b.checkStage==='send'){b.checkStage='transit';}
-      this.logBill(b,'USPS tracking added',b.vendor+' · '+b.sent.tracking+' · sent '+fmtD(b.sent.date));
-      n++;
+      if(!r.include||!r.vendor||!r.tracking)return;
+      const tn=r.tracking.replace(/\s/g,'');
+      // same vendor AND same sent date (or no date yet) = one envelope
+      const targets=this.uspsCandBills().filter(b=>b.vendor===r.vendor&&(!r.sentDate||sentOf(b)===r.sentDate||!sentOf(b)));
+      if(!targets.length)return;
+      targets.forEach(b=>{
+        const sentDate=r.sentDate||sentOf(b)||todayISO;
+        if(!b.sent)b.sent={date:sentDate,by:CURRENT.u,initials:CURRENT.initials,tracking:''};
+        else if(r.sentDate)b.sent.date=r.sentDate;
+        b.sent.tracking=tn;
+        if(b.checkStage==='send')b.checkStage='transit';
+        bills++;
+      });
+      this.logBill(targets[0],'USPS tracking added',r.vendor+' · '+tn+' · '+targets.length+' check'+(targets.length!==1?'s':'')+' · sent '+fmtD(targets[0].sent.date));
+      ship++;
     });
-    this.persist();this.closeDrawer();this.toast('Added tracking to '+n+' bill'+(n!==1?'s':''));this.render();
+    this.persist();this.closeDrawer();this.toast('Tracking applied to '+bills+' check'+(bills!==1?'s':'')+' across '+ship+' shipment'+(ship!==1?'s':''));this.render();
   },
   markSent(id){const b=BILLS.find(x=>x.id===+id);if(!b||b.isChase||!(can('record')||can('send')))return;
     const fld=document.getElementById('snt_'+id);const date=(fld&&fld.value)||todayISO;
