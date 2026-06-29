@@ -626,7 +626,7 @@ const App={
     if(can('pickup')) it.push({id:'pickups',label:'Pickups',ic:'truck',badge:()=>BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup').length||null});
     it.push({id:'vendors',label:'Vendors',ic:'vendor'});
     it.push({id:'eom',label:'EOM Tracker',ic:'cal'});
-    if(CURRENT.role==='admin'){it.push({id:'accounts',label:'Accounts',ic:'entity'});it.push({id:'users',label:'Users',ic:'users'});it.push({id:'activity',label:'Activity',ic:'audit'});it.push({id:'deleted',label:'Deleted',ic:'trash',badge:()=>(DELETED.bills.length+DELETED.vendors.length)||null});}
+    if(CURRENT.role==='admin'){it.push({id:'accounts',label:'Accounts',ic:'entity'});it.push({id:'users',label:'Users',ic:'users'});it.push({id:'activity',label:'Activity',ic:'audit'});it.push({id:'deleted',label:'Deleted',ic:'trash',badge:()=>(DELETED.bills.length+DELETED.vendors.length)||null});it.push({id:'settings',label:'Admin Settings',ic:'bolt'});}
     return it;
   },
   renderNav(){if(!CURRENT)return;
@@ -1043,11 +1043,36 @@ const App={
   vclear(){this.state.vMethod='all';this.state.vStatus='active';this.state.q='';this.render();},
 
   /* ---------- ACCOUNTS ---------- */
+  v_settings(){
+    if(CURRENT.role!=='admin')return '<div class="empty">Admins only.</div>';
+    const lastBackup=this._lastBackupAt?fmtD(this._lastBackupAt):'—';
+    const billCount=BILLS.filter(b=>!b.isChase).length;
+    return `
+    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Data backup</h3><span class="sub">protect everyone's daily work</span></div>
+      <div style="padding:16px 18px">
+        <p style="font-size:13px;color:var(--ink-2);margin-bottom:14px">Download a full copy of everything — bills, vendors, account numbers, audit log, and user settings. Do this at the end of each day and keep the file somewhere safe. If anything is ever lost, restore it from a backup file.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-gold btn-sm" onclick="App.downloadBackup()">${svg(ICN.arrow,14)} Download backup</button>
+          <input type="file" id="histfile" accept="application/json" style="display:none" onchange="App.importHistory(this.files[0])">
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.arrow,14)} Import / restore (JSON)</button>
+        </div>
+        <p style="font-size:11.5px;color:var(--ink-3);margin-top:10px">Currently ${billCount} bills, ${VENDORS.length} vendors, ${USERS.length} users on file.</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-h"><h3>Danger zone</h3><span class="sub">irreversible</span></div>
+      <div style="padding:16px 18px">
+        <p style="font-size:13px;color:var(--ink-2)">To completely wipe all data, do it from your hosting dashboard (Netlify → Blobs) and delete the <span class="mono">bills:</span>, <span class="mono">meta</span>, and <span class="mono">users</span> keys. There is intentionally no one-click wipe inside the portal. <b>Always download a backup first.</b></p>
+      </div>
+    </div>`;
+  },
   v_accounts(){
     const at=c=>BILLS.filter(b=>b.account===c);
     const stores=ACCOUNTS.filter(a=>a.type==='store'),ents=ACCOUNTS.filter(a=>a.type==='entity');
-    const card=a=>{const bs=at(a.code);return `<div class="ent-card"><div class="ent-top"><div class="ent-code">${a.code}</div></div><div class="nm">&nbsp;</div><div class="ent-stat"><div class="open"><b>${bs.length}</b><span>bills</span></div><div style="text-align:right"><div class="mono" style="font-weight:700">${bs.length?money(bs.reduce((s,b)=>s+b.amount,0)):'—'}</div><div style="font-size:10.5px;color:var(--ink-3)">total</div></div></div></div>`};
-    return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto;display:flex;gap:8px">${CURRENT.role==='admin'?`<button class="btn btn-gold btn-sm" onclick="App.downloadBackup()">${svg(ICN.arrow,14)} Download backup</button><input type="file" id="histfile" accept="application/json" style="display:none" onchange="App.importHistory(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('histfile').value='';document.getElementById('histfile').click()">${svg(ICN.arrow,14)} Import / restore (JSON)</button>`:''}</div></div><div class="section-title">Entities</div><div class="ent-grid" style="margin-bottom:24px">${ents.map(card).join('')}</div><div class="section-title">Stores (${stores.length})</div><div class="ent-grid">${stores.map(card).join('')}</div>`;
+    const row=a=>{const bs=at(a.code);const open=bs.filter(b=>!b.isChase&&b.stage!=='rejected'&&!(b.paid||b.delivered)).length;return `<tr class="click" onclick="App.go('bills');App.state.q='${String(a.code).replace(/'/g,"\\'")}';App.render()"><td><div style="display:flex;align-items:center;gap:10px"><div class="vlogo" style="width:30px;height:30px;font-size:11px;border-radius:8px">${a.code.slice(0,3)}</div><b>${a.code}</b>${a.name&&a.name!==a.code?`<span style="color:var(--ink-3);font-size:12px">${a.name}</span>`:''}</div></td><td class="r mono">${bs.length}</td><td class="r mono" style="color:var(--ink-2)">${open||'—'}</td><td class="r mono" style="font-weight:700">${bs.length?money(bs.reduce((s,b)=>s+(+b.amount||0),0)):'—'}</td></tr>`};
+    const tbl=(list)=>`<div class="card" style="margin-bottom:20px"><div class="tablewrap"><table><thead><tr><th>Code</th><th class="r">Bills</th><th class="r">Open</th><th class="r">Total</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>`;
+    return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto">${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div></div>
+      <div class="section-title">Entities</div>${tbl(ents)}
+      <div class="section-title">Stores (${stores.length})</div>${tbl(stores)}`;
   },
   downloadBackup(){
     if(CURRENT.role!=='admin')return;
@@ -1070,6 +1095,7 @@ const App={
     document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
     this.log('Downloaded backup',BILLS.length+' bills · '+VENDORS.length+' vendors');
+    this._lastBackupAt=new Date().toISOString().slice(0,10);
     this.toast('Backup downloaded · '+BILLS.length+' bills');
   },
   importHistory(file){
