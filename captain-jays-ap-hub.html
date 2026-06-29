@@ -252,6 +252,7 @@ th.r,td.r{text-align:right}
 }
 </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -343,10 +344,41 @@ const PERMS={
   ap:['record','view_all'],
   frontdesk:['pickup','view_all'],
 };
+// All toggleable capabilities with human labels (shown in the user editor)
+const PERM_LABELS={
+  create:'Enter / create bills',
+  submit:'Submit bills for approval',
+  approve:'Approve bills',
+  record:'Record payments (pay / print / cut)',
+  send:'Mark checks sent (On the way)',
+  pickup:'Handle pickups',
+  vendors_add:'Add / edit vendors',
+  vendors_toggle:'Activate / deactivate vendors',
+  users:'Manage users',
+  view_all:'View all bills (everyone\u2019s)',
+};
+// Section tree: each section groups one or more real capabilities.
+const PERM_SECTIONS=[
+  {key:'bills',  label:'Bills',      perms:['create','submit']},
+  {key:'approvals',label:'Approvals',perms:['approve']},
+  {key:'payments',label:'Payments',  perms:['record']},
+  {key:'tracking',label:'Tracking',  perms:['send']},
+  {key:'pickups', label:'Pickups',   perms:['pickup']},
+  {key:'vendors', label:'Vendors',   perms:['vendors_add','vendors_toggle']},
+  {key:'users',   label:'Users',     perms:['users']},
+  {key:'visibility',label:'Visibility',perms:['view_all']},
+];
+const ALL_PERMS=Object.keys(PERM_LABELS);
 const OFFLINE_USERS=[ {u:'heather', p:'captain2657', name:'Heather Williams', role:'admin', initials:'HW'} ];
 let USERS=OFFLINE_USERS.map(x=>({u:x.u,name:x.name,role:x.role,initials:x.initials}));
 let CURRENT=null;
-const can=p=>!!CURRENT&&(CURRENT.role==='admin'||(PERMS[CURRENT.role]||[]).includes(p));
+// Custom per-user perms (CURRENT.perms array) override role defaults when present.
+const can=p=>{
+  if(!CURRENT)return false;
+  if(CURRENT.role==='admin')return true;
+  if(Array.isArray(CURRENT.perms))return CURRENT.perms.includes(p);
+  return (PERMS[CURRENT.role]||[]).includes(p);
+};
 /* ---- edit tiers (layered under job role). Admin = everything, no tier needed.
    T1 = no edit · T2 = edit Bills + Tracking · T3 = + edit Payments.
    The tier a role can reach is capped by whether the role touches payments. ---- */
@@ -797,7 +829,7 @@ const App={
     const nextAction=b=>{
       if(!b.payType)return `<button class="btn btn-gold" data-record="${b.id}" style="flex-shrink:0">${svg(ICN.dollar,15)} Pay Bill</button>`;
       if(b.checkStage==='cut')return `<button class="btn btn-gold" data-cut="${b.id}" style="flex-shrink:0">${svg(ICN.check,15)} Mark Cut</button>`;
-      if(b.checkStage==='send')return `<button class="btn btn-gold" data-send="${b.id}" style="flex-shrink:0">${svg(ICN.truck,15)} Send</button>`;
+      if(b.checkStage==='send')return (can('record')||can('send'))?`<button class="btn btn-gold" data-send="${b.id}" style="flex-shrink:0">${svg(ICN.truck,15)} Send</button>`:'';
       return '';
     };
     const card=b=>`<div class="card" style="${rowBg(b)}"><div style="padding:14px 16px;display:flex;align-items:center;gap:14px">
@@ -877,7 +909,7 @@ const App={
     } else if(tab==='send'){
       body=`<div class="card"><div class="card-h"><h3>To Send</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
       <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Cut by</th><th class="r"></th></tr></thead>
-      <tbody>${toSend.length?toSend.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Send</button>`:''}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to send. Cut checks land here (also in Tracking).</div></div></td></tr>`}</tbody></table></div></div>`;
+      <tbody>${toSend.length?toSend.map(b=>`<tr class="click" data-bill="${b.id}"><td>${nameCell(b)}</td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Send</button>`:''}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to send. Cut checks land here (also in Tracking).</div></div></td></tr>`}</tbody></table></div></div>`;
     } else {
       const byStore={};toDep.forEach(ch=>{(byStore[ch.account]=byStore[ch.account]||[]).push(ch);});
       const blocks=Object.keys(byStore).sort().map(store=>{const list=byStore[store];return `<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Store ${store}</h3><span class="sub">${list.length} check${list.length!==1?'s':''} · ${money(sum(list))}</span></div>
@@ -899,11 +931,12 @@ const App={
     const readiness=Object.entries(vr).sort((a,b)=>b[1].ready-a[1].ready);
     const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
     return `
+    ${(can('record')||can('create'))?`<div class="filters" style="margin-bottom:14px"><span style="color:var(--ink-3);font-size:13px">Got a USPS Click-N-Ship confirmation? Pull its tracking numbers in automatically.</span><div style="margin-left:auto"><input type="file" id="uspsfile" accept="application/pdf" style="display:none" onchange="App.importUspsPdf(this.files[0])"><button class="btn btn-gold btn-sm" onclick="document.getElementById('uspsfile').value='';document.getElementById('uspsfile').click()">${svg(ICN.truck,14)} Import USPS PDF</button></div></div>`:''}
     ${readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready</span></div>
       <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span>${v.ready?`<span class="badge b-amber" style="font-size:9px;padding:1px 7px">${v.ready} ready to send</span>`:''}${v.proc?`<span class="badge b-gray" style="font-size:9px;padding:1px 7px">${v.proc} not printed/cut yet — not ready</span>`:'<span class="badge b-green" style="font-size:9px;padding:1px 7px">all ready</span>'}</div>`).join('')}</div></div>`:''}
     <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>To be sent out</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
       <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Batch</th><th>Date sent</th><th class="r"></th></tr></thead>
-      <tbody>${toSend.length?toSend.map(b=>`<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td onclick="event.stopPropagation()"><input type="date" id="snt_${b.id}" value="${b.sent&&b.sent.date?b.sent.date:todayISO}" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;background:var(--surface)"></td><td class="r"><button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Mark Sent</button></td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to mail. Cut checks land here.</div></div></td></tr>`}</tbody></table></div>
+      <tbody>${toSend.length?toSend.map(b=>`<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td onclick="event.stopPropagation()"><input type="date" id="snt_${b.id}" value="${b.sent&&b.sent.date?b.sent.date:todayISO}" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;background:var(--surface)"></td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Mark Sent</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to mail. Cut checks land here.</div></div></td></tr>`}</tbody></table></div>
     </div>
     <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>On the way</h3><span class="sub">${transit.length} · add USPS tracking #, then delivered date</span></div>
       <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th class="r">Amount</th><th>Check #</th><th>Tracking #</th><th>Sent</th><th class="r"></th></tr></thead>
@@ -1454,7 +1487,101 @@ const App={
     this.persist();this.toast('#'+b.id+' cut'+(b.isChase?' — ready to deposit':b.payType==='pickup'?' — ready for pickup':' — ready to send'));this.render();
   },
   /* send: one click, NO tracking # (it's added afterward in Tracking) */
-  markSent(id){const b=BILLS.find(x=>x.id===+id);if(!b||b.isChase||!can('record'))return;
+  // ---- USPS Click-N-Ship PDF import ----
+  async importUspsPdf(file){
+    if(!file||!(can('record')||can('create')))return;
+    if(typeof pdfjsLib==='undefined'){this.toast('PDF reader still loading — try again in a moment');return;}
+    this.toast('Reading USPS PDF…');
+    try{
+      const buf=await file.arrayBuffer();
+      const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      let text='';
+      for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const tc=await page.getTextContent();text+=' '+tc.items.map(i=>i.str).join(' ');}
+      const shipments=this.parseUsps(text);
+      if(!shipments.length){this.toast('No tracking numbers found in that PDF');return;}
+      this.openUspsReview(shipments);
+    }catch(e){this.toast('Could not read PDF — '+(e.message||''));}
+  },
+  // pull {tracking, recipient, date} triples out of the extracted text
+  parseUsps(text){
+    const t=text.replace(/\s+/g,' ');
+    const out=[];
+    // the order's "Placed on" date = the day it was sent (same-day shipping)
+    const MON={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+    let orderDate='';
+    const om=t.match(/Placed on:\s*([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s*(\d{4})/i);
+    if(om)orderDate=om[3]+'-'+(MON[om[1].slice(0,3).toLowerCase()]||'01')+'-'+String(om[2]).padStart(2,'0');
+    // USPS IMpb tracking: a long all-digit run (22–34 digits)
+    const re=/\b(\d{22,34})\b/g;
+    let m;const seen=new Set();
+    while((m=re.exec(t))){
+      const tn=m[1];
+      if(seen.has(tn))continue;seen.add(tn);
+      const after=t.slice(m.index+m[0].length, m.index+m[0].length+240);
+      let recipient='';
+      const sm=after.match(/Shipped To:\s*([A-Za-z][^0-9]*?)\s+(?:\d|PO BOX|P\.O\.)/i);
+      if(sm)recipient=sm[1].trim().replace(/\s+(PO|P\.O\.).*$/i,'').trim();
+      const dm=after.match(/delivery date:\s*(\d{2}\/\d{2}\/\d{4})/i)||t.slice(Math.max(0,m.index-180),m.index).match(/delivery date:\s*(\d{2}\/\d{2}\/\d{4})/i);
+      let dd='';if(dm){const p=dm[1].split('/');dd=p[2]+'-'+p[0]+'-'+p[1];}
+      out.push({tracking:tn,recipient,deliveryDate:dd,sentDate:orderDate});
+    }
+    return out;
+  },
+  // match a USPS recipient name to a vendor that has an in-transit (or sent) check
+  matchUspsVendor(recipient){
+    if(!recipient)return null;
+    const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(llc|inc|co|corp|distributors|company|the)\b/g,'').replace(/\s+/g,' ').trim();
+    const rn=norm(recipient);if(!rn)return null;
+    const cands=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='transit'||b.checkStage==='send'));
+    let best=null,bs=0;
+    cands.forEach(b=>{const vn=norm(b.vendor);if(!vn)return;
+      const rt=new Set(rn.split(' ')),vt=new Set(vn.split(' '));let inter=0;rt.forEach(x=>{if(vt.has(x))inter++;});
+      const score=inter/Math.max(rt.size,vt.size);
+      if(score>bs){bs=score;best=b;}
+    });
+    return bs>=0.34?best:null;
+  },
+  openUspsReview(shipments){
+    this._usps=shipments.map((s,i)=>{const b=this.matchUspsVendor(s.recipient);return {...s,billId:b?b.id:null,include:!!b,idx:i};});
+    this.renderUspsReview();
+  },
+  renderUspsReview(){
+    const rows=this._usps;
+    const billSent=x=>(x.sent&&x.sent.date)?fmtD(x.sent.date):'not sent';
+    const opts=b=>BILLS.filter(x=>!x.isChase&&x.payType==='check'&&(x.checkStage==='transit'||x.checkStage==='send')).map(x=>`<option value="${x.id}" ${b===x.id?'selected':''}>${x.vendor} · ${x.account} · ${money(x.amount)} · sent ${billSent(x)}${(x.sent&&x.sent.tracking)?' · has #':''}</option>`).join('');
+    const body=rows.map(r=>`<div style="border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:10px;${r.include?'':'opacity:.55'}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <input type="checkbox" ${r.include?'checked':''} onchange="App.uspsSet(${r.idx},'include',this.checked)" style="width:16px;height:16px">
+        <b style="flex:1;font-size:13px">${r.recipient||'(unknown recipient)'}</b>
+        ${r.sentDate?`<span style="font-size:11px;color:var(--ink-2)">sent ${fmtD(r.sentDate)}</span>`:(r.deliveryDate?`<span style="font-size:11px;color:var(--ink-3)">est. ${fmtD(r.deliveryDate)}</span>`:'')}
+      </div>
+      <div class="field" style="margin-bottom:8px"><label style="font-size:11px">Tracking #</label><div class="inp" style="padding:0"><input value="${r.tracking}" onchange="App.uspsSet(${r.idx},'tracking',this.value)" class="mono" style="border:none;background:none;width:100%;font:inherit;font-size:12px;padding:8px 10px"></div></div>
+      <div class="field"><label style="font-size:11px">Apply to bill <span style="color:var(--ink-3)">· shows each bill's date sent</span></label><select class="selent" style="width:100%;font-size:12.5px" onchange="App.uspsSet(${r.idx},'billId',this.value?+this.value:null)"><option value="">— skip (no match) —</option>${opts(r.billId)}</select></div>
+      ${r.billId?(()=>{const bb=BILLS.find(x=>x.id===r.billId);const cur=bb&&bb.sent&&bb.sent.date;const willSet=r.sentDate&&(!cur);return (r.sentDate)?`<p style="font-size:11px;color:var(--ink-3);margin-top:6px">Date sent → <b style="color:var(--ink-2)">${fmtD(r.sentDate)}</b>${cur&&cur!==r.sentDate?' (bill currently '+fmtD(cur)+')':''}</p>`:'';})():''}
+    </div>`).join('');
+    const matched=rows.filter(r=>r.include&&r.billId).length;
+    this.openDrawerEl(`
+      <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px;background:var(--gold);color:var(--navy-900)">${svg(ICN.truck,18)}</div><div><div style="font-weight:700;font-size:15px">Review USPS tracking</div><div style="font-size:12.5px;color:var(--ink-3)">${rows.length} shipment${rows.length!==1?'s':''} found · ${matched} matched${rows[0]&&rows[0].sentDate?' · sent '+fmtD(rows[0].sentDate):''}</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
+      <div class="dr-body"><p style="font-size:12px;color:var(--ink-3);margin-bottom:12px">Confirm each tracking number and the bill it belongs to. The send date comes from the USPS order date. Untick any you don't want, fix the match, then apply.</p>${body}</div>
+      <div class="dr-foot"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.applyUsps()">${svg(ICN.check,15)} Apply ${matched} tracking #${matched!==1?'s':''}</button></div>`);
+  },
+  uspsSet(idx,key,val){const r=this._usps.find(x=>x.idx===idx);if(!r)return;r[key]=val;if(key==='billId'&&val)r.include=true;this.renderUspsReview();},
+  applyUsps(){
+    let n=0;
+    this._usps.forEach(r=>{
+      if(!r.include||!r.billId||!r.tracking)return;
+      const b=BILLS.find(x=>x.id===r.billId);if(!b)return;
+      const sentDate=r.sentDate||(b.sent&&b.sent.date)||todayISO;
+      if(!b.sent)b.sent={date:sentDate,by:CURRENT.u,initials:CURRENT.initials,tracking:''};
+      else if(r.sentDate)b.sent.date=r.sentDate;   // use the USPS order date as the send date
+      b.sent.tracking=r.tracking.replace(/\s/g,'');
+      if(b.checkStage==='send'){b.checkStage='transit';}
+      this.logBill(b,'USPS tracking added',b.vendor+' · '+b.sent.tracking+' · sent '+fmtD(b.sent.date));
+      n++;
+    });
+    this.persist();this.closeDrawer();this.toast('Added tracking to '+n+' bill'+(n!==1?'s':''));this.render();
+  },
+  markSent(id){const b=BILLS.find(x=>x.id===+id);if(!b||b.isChase||!(can('record')||can('send')))return;
     const fld=document.getElementById('snt_'+id);const date=(fld&&fld.value)||todayISO;
     b.sent={date,by:CURRENT.u,initials:CURRENT.initials,tracking:(b.sent&&b.sent.tracking)||''};b.checkStage='transit';
     this.logBill(b,'Sent check',b.vendor+' · '+money(b.amount)+' · '+fmtD(date));
@@ -1684,7 +1811,54 @@ const App={
     const ts=tiersFor(role);const c=Math.min(+cur||1,ts[ts.length-1]);
     return '<label>Edit tier <span style="color:var(--ink-3)">· what they can change after the fact</span></label><select id="u_tier" class="selent" style="width:100%">'+ts.map(t=>`<option value="${t}" ${t===c?'selected':''}>T${t} — ${TIER_LABEL[t]}</option>`).join('')+'</select>';
   },
-  userRoleToggle(){const role=$('#u_role')?$('#u_role').value:'admin';const cur=$('#u_tier')?+$('#u_tier').value:1;const w=$('#u_tier_wrap');if(w)w.innerHTML=this.tierFieldHTML(role,cur);},
+  userRoleToggle(){const role=$('#u_role')?$('#u_role').value:'admin';const cur=$('#u_tier')?+$('#u_tier').value:1;const w=$('#u_tier_wrap');if(w)w.innerHTML=this.tierFieldHTML(role,cur);
+    // when role changes, refresh the permission checkboxes to that role's defaults
+    const pw=$('#u_perms');if(pw)pw.innerHTML=this.permRows({role});
+    const wrap=$('#u_perms_wrap');if(wrap)wrap.style.display=role==='admin'?'none':'';
+    this.permInit();
+  },
+  // effective perms for a user object (custom list if set, else role defaults)
+  effectivePerms(u){if(!u)return [];if(u.role==='admin')return ALL_PERMS.slice();if(Array.isArray(u.perms))return u.perms;return PERMS[u.role]||[];},
+  permRows(ex){const role=ex?ex.role:'admin';if(role==='admin')return '<div style="padding:12px;font-size:12.5px;color:var(--ink-3)">Administrators have every permission.</div>';
+    const active=new Set(this.effectivePerms(ex&&ex.role?ex:{role}));
+    return PERM_SECTIONS.map((sec,i)=>{
+      const on=sec.perms.filter(p=>active.has(p)).length;
+      const all=on===sec.perms.length;
+      const single=sec.perms.length===1;
+      if(single){
+        const p=sec.perms[0];
+        return `<div class="perm-sec" style="${i?'border-top:1px solid var(--line);':''}">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer">
+            <input type="checkbox" class="u_perm u_secmaster" data-perm="${p}" data-sec="${sec.key}" ${active.has(p)?'checked':''} style="width:16px;height:16px">
+            <b style="flex:1;font-size:13px">${sec.label}</b>
+            <span style="font-size:11px;color:var(--ink-3)">${PERM_LABELS[p]}</span>
+          </label>
+        </div>`;
+      }
+      const some=on>0&&!all;
+      const subRows=sec.perms.map(p=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 12px 7px 40px;font-size:12.5px;cursor:pointer;color:var(--ink-2)"><input type="checkbox" class="u_perm" data-perm="${p}" data-sec="${sec.key}" ${active.has(p)?'checked':''} onchange="App.permSubChanged('${sec.key}')" style="width:15px;height:15px"><span>${PERM_LABELS[p]}</span></label>`).join('');
+      return `<div class="perm-sec" style="${i?'border-top:1px solid var(--line);':''}">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px">
+          <input type="checkbox" class="u_secmaster" data-sec="${sec.key}" ${all?'checked':''} onchange="App.permMasterChanged('${sec.key}',this.checked)" style="width:16px;height:16px">
+          <b style="flex:1;font-size:13px;cursor:pointer" onclick="App.permToggleExpand('${sec.key}')">${sec.label} <span style="font-weight:400;color:var(--ink-3);font-size:11px">· ${on}/${sec.perms.length}</span></b>
+          <button type="button" class="perm-exp" data-sec="${sec.key}" onclick="App.permToggleExpand('${sec.key}')" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:4px;display:flex;transition:transform .15s" aria-label="expand">${svg(ICN.arrow,14)}</button>
+        </div>
+        <div class="perm-sub" id="psub_${sec.key}" style="display:none">${subRows}</div>
+      </div>`;
+    }).join('');
+  },
+  permToggleExpand(key){const el=$('#psub_'+key);if(!el)return;const open=el.style.display!=='none';el.style.display=open?'none':'block';
+    const btn=document.querySelector('.perm-exp[data-sec="'+key+'"]');if(btn)btn.style.transform=open?'rotate(0deg)':'rotate(90deg)';
+  },
+  permMasterChanged(key,on){const sec=PERM_SECTIONS.find(s=>s.key===key);if(!sec)return;
+    document.querySelectorAll('.u_perm[data-sec="'+key+'"]').forEach(el=>{el.checked=on;});
+    this.permSyncLabel(key);
+  },
+  permSubChanged(key){this.permSyncMaster(key);this.permSyncLabel(key);},
+  permSyncMaster(key){const subs=Array.from(document.querySelectorAll('.u_perm[data-sec="'+key+'"]'));const on=subs.filter(e=>e.checked).length;const master=document.querySelector('.u_secmaster[data-sec="'+key+'"]');if(master){master.checked=on===subs.length&&subs.length>0;master.indeterminate=on>0&&on<subs.length;}},
+  permSyncLabel(key){const sec=PERM_SECTIONS.find(s=>s.key===key);if(!sec||sec.perms.length===1)return;const subs=Array.from(document.querySelectorAll('.u_perm[data-sec="'+key+'"]'));const on=subs.filter(e=>e.checked).length;const lbl=document.querySelector('#psub_'+key).parentElement.querySelector('b span');if(lbl)lbl.textContent='· '+on+'/'+sec.perms.length;this.permSyncMaster(key);},
+  userPermsReset(){const role=$('#u_role')?$('#u_role').value:'admin';const defs=new Set(PERMS[role]||[]);document.querySelectorAll('.u_perm').forEach(el=>{el.checked=defs.has(el.dataset.perm);});PERM_SECTIONS.forEach(s=>this.permSyncLabel(s.key));this.toast('Reset to '+(ROLES[role]||role)+' defaults');},
+  permInit(){PERM_SECTIONS.forEach(s=>this.permSyncMaster(s.key));},
   openUser(uname){if(!can('users'))return;const ex=uname?USERS.find(x=>x.u===uname):null;const inp='border:none;background:none;width:100%;font:inherit;font-weight:600;padding:9px 11px';
     this.openDrawerEl(`
       <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px;background:var(--gold);color:var(--navy-900)">${svg(ICN.users,18)}</div><div><div style="font-weight:700;font-size:15px">${ex?'Edit user':'Add user'}</div><div style="font-size:12.5px;color:var(--ink-3)">${ex?ex.name:'New login'}</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
@@ -1700,20 +1874,28 @@ const App={
         </div>
         <div class="field" id="u_tier_wrap">${this.tierFieldHTML(ex?ex.role:'admin',ex?userTier(ex):1)}</div>
         <label style="display:flex;align-items:center;gap:9px;margin-top:6px;font-size:13px;color:var(--ink-2);cursor:pointer;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:11px 13px"><input type="checkbox" id="u_training" ${ex&&ex.inTraining?'checked':''} style="width:16px;height:16px"> <span><b>In training</b> — this person's entered bills go to Pending Submission for anyone to approve.</span></label>
+        <div class="field" style="margin-top:14px;${ex&&ex.role==='admin'?'display:none':(!ex?'':'')}" id="u_perms_wrap">
+          <label style="display:flex;align-items:center;justify-content:space-between">Permissions <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="App.userPermsReset()">Reset to role defaults</button></label>
+          <p style="font-size:11.5px;color:var(--ink-3);margin:2px 0 8px">Starts from the role's defaults — toggle anything on or off for this specific person.</p>
+          <div id="u_perms" style="border:1px solid var(--line);border-radius:10px;overflow:hidden">${this.permRows(ex)}</div>
+        </div>
       </div>
       <div class="dr-foot"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.saveUser('${ex?ex.u:''}')">${ex?'Save':'Add user'}</button></div>`);
+    this.permInit();
   },
   async saveUser(orig){const name=($('#u_name').value||'').trim(),u=($('#u_user').value||'').trim(),initials=($('#u_init').value||'').trim().toUpperCase(),p=$('#u_pass').value||'',role=$('#u_role').value,inTraining=$('#u_training')?$('#u_training').checked:false;
     const tier=role==='admin'?undefined:($('#u_tier')?+$('#u_tier').value:1);
+    // gather custom permissions (admins always get everything → no custom list)
+    let perms=undefined;
+    if(role!=='admin'){const picked=Array.from(document.querySelectorAll('.u_perm:checked')).map(el=>el.dataset.perm);perms=picked;}
     if(!name||!u||!initials){this.toast('Fill name, username and initials');return;}
     if(!orig&&!p){this.toast('Set a password for the new user');return;}
     if(API.online===false||!TOKEN){this.toast('Offline — can’t save users right now');return;}
     try{
-      const list=await API.upsertUser({u:orig||u,name,role,initials,inTraining,tier,password:p||undefined});
+      const list=await API.upsertUser({u:orig||u,name,role,initials,inTraining,tier,perms,password:p||undefined});
       USERS=Array.isArray(list)?list:USERS;
-      // ensure flags reflect locally even if the backend doesn't echo them yet
-      const tgt=USERS.find(x=>x.u===(orig||u));if(tgt){tgt.inTraining=inTraining;tgt.tier=tier;}
-      if(CURRENT.u===(orig||u)){CURRENT.inTraining=inTraining;CURRENT.tier=tier;}
+      const tgt=USERS.find(x=>x.u===(orig||u));if(tgt){tgt.inTraining=inTraining;tgt.tier=tier;tgt.perms=perms;}
+      if(CURRENT.u===(orig||u)){CURRENT.inTraining=inTraining;CURRENT.tier=tier;CURRENT.perms=perms;}
       this.log(orig?'Updated user':'Created user',name+' · '+ROLES[role]+(role!=='admin'?' · T'+tier:'')+(inTraining?' · in training':''));
       this.persist();
       this.closeDrawer();this.toast('User saved · '+name);this.render();
@@ -1775,6 +1957,7 @@ const App={
   search(q){this.state.q=q;if(['bills','vendors'].includes(this.state.view))this.render();else this.go('bills');},
   toast(msg){const t=document.createElement('div');t.className='toast';t.innerHTML=`${svg(ICN.check,16)}${msg}`;$('#toasts').appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},2600)},
 };
+if(typeof pdfjsLib!=='undefined'){try{pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';}catch(e){}}
 App.init();
 </script>
 </body>
