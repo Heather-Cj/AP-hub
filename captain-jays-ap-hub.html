@@ -974,7 +974,7 @@ const App={
     if(tab==='send'){
       const rows=tsort(toSend);
       body=`${readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready</span></div>
-        <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>`<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span>${v.ready?`<span class="badge b-amber" style="font-size:9px;padding:1px 7px">${v.ready} ready to send</span>`:''}${v.proc?`<span class="badge b-gray" style="font-size:9px;padding:1px 7px">${v.proc} not printed/cut yet</span>`:'<span class="badge b-green" style="font-size:9px;padding:1px 7px">all ready</span>'}</div>`).join('')}</div></div>`:''}
+        <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>{const total=v.ready+v.proc;const done=v.ready===total;return `<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span><span class="badge ${done?'b-green':'b-amber'}" style="font-size:9px;padding:1px 7px">${v.ready}/${total} ready to send</span></div>`;}).join('')}</div></div>`:''}
       <div class="card"><div class="card-h"><h3>To be sent out</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
         <div class="tablewrap"><table><thead><tr>${th('vendor','Vendor')}${th('account','Account')}${th('amount','Amount','r')}${th('check','Check #')}<th>Batch</th><th>Date sent</th><th class="r"></th></tr></thead>
         <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td onclick="event.stopPropagation()"><input type="date" id="snt_${b.id}" value="${b.sent&&b.sent.date?b.sent.date:todayISO}" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;background:var(--surface)"></td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Mark Sent</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to mail. Cut checks land here.</div></div></td></tr>`}</tbody></table></div></div>`;
@@ -1275,6 +1275,7 @@ const App={
         </div>
         <div class="field"><label>GL account</label><div class="inp" style="padding:0"><input id="f_gl" list="gllist" placeholder="e.g. Utilities, Rent, Supplies…" style="${inp}"></div><datalist id="gllist"><option value="Utilities"><option value="Rent"><option value="Supplies"><option value="Insurance"><option value="Repairs & Maintenance"><option value="Food · COGS"><option value="Licenses & Fees"><option value="Security"></datalist></div>
         <div class="field"><label>Link to bill <span style="color:var(--ink-3)">· paste OneDrive / document URL</span></label><div class="inp" style="padding:0"><input id="f_link" placeholder="https://… (we link, never store the file)" style="${inp}"></div></div>
+        <div class="field"><label>Memo / notes <span style="color:var(--ink-3)">· optional</span></label><div class="inp" style="padding:0"><textarea id="f_memo" rows="2" placeholder="Notes about this bill…" style="border:none;background:none;width:100%;font:inherit;padding:9px 11px;resize:vertical"></textarea></div></div>
         <div id="f_sendby" style="font-size:11.5px;color:var(--ink-3);margin-top:4px"></div>
         <div id="f_monthnote" style="font-size:12.5px;margin-top:8px;min-height:18px"></div>
         <label style="display:flex;align-items:center;gap:9px;margin-top:8px;font-size:13px;color:var(--ink-2);cursor:pointer"><input type="checkbox" id="f_prepaid" style="width:16px;height:16px"> Prepaid invoice</label>
@@ -1298,7 +1299,8 @@ const App={
     const v=vendor(vname);
     if(!v){this.toast('“'+vname+'” isn’t an active vendor — pick from the list (admin adds new ones)');return;}
     if(!v.active){this.toast('“'+vname+'” is inactive — reactivate it first');return;}
-    const b={id:nextId++,vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,link,receivedDate:todayISO,
+    const comments=(g('f_memo')?g('f_memo').value:'').trim();
+    const b={id:nextId++,vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,link,comments,receivedDate:todayISO,
       method:null,tracking:'',payType:null,enteredBy:CURRENT.u,enteredInitials:CURRENT.initials,
       reqApproval:{required:approq,approver},
       stage:'submission',approval:null,paid:null,pickedUp:null,sync:'synced'};
@@ -1553,6 +1555,7 @@ const App={
           ${b.chaseRef?`<dt>Chase check</dt><dd><span onclick="App.openBill(${b.chaseRef})" style="cursor:pointer;color:var(--blue);font-weight:600">Chase ${b.account} · #${b.chaseRef} ${svg(ICN.arrow,12)}</span></dd>`:''}
           <dt>Entered by</dt><dd>${b.enteredInitials}</dd>
         </dl>
+        ${b.comments?`<div style="margin-top:6px"><div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Memo / notes</div><div style="font-size:13px;color:var(--ink-1);white-space:pre-wrap;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px">${String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`:''}
         ${histHtml}
       </div>
       <div class="dr-foot"><button class="btn btn-ghost" data-close>Close</button>${editDel}<div style="margin-left:auto;display:flex;gap:8px">${acts.join('')}</div></div>`);
@@ -1792,6 +1795,7 @@ const App={
         <div class="field"><label>Invoice date</label>${dateField('e_invdate',b.invoiceDate||'')}</div>
         <div class="field"><label>Due date</label>${dateField('e_due',b.due||'')}</div>
         <div class="field"><label>Bill link <span style="color:var(--ink-3)">· optional</span></label><div class="inp" style="padding:0"><input id="e_link" value="${(b.link||'').replace(/"/g,'&quot;')}" placeholder="https://" style="${inp}"></div></div>
+        <div class="field"><label>Memo / notes <span style="color:var(--ink-3)">· optional</span></label><div class="inp" style="padding:0"><textarea id="e_memo" rows="2" placeholder="Notes about this bill…" style="border:none;background:none;width:100%;font:inherit;padding:9px 11px;resize:vertical">${(b.comments||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea></div></div>
         ${payEdit?`<div style="border-top:1px solid var(--line);margin:14px 0 4px;padding-top:12px"><div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Payment · tier 3</div>
           <div class="field"><label>Method</label><select id="e_method" class="selent" style="width:100%">${METHODS.map(m=>`<option ${m===b.method?'selected':''}>${m}</option>`).join('')}</select></div>
           <div class="field"><label>${b.paid?'Payment date':'Print date'}</label>${dateField('e_paydate',payDate)}</div></div>`:''}
@@ -1801,15 +1805,16 @@ const App={
   },
   saveEditBill(id){const b=BILLS.find(x=>x.id===+id);if(!b||!canEdit('bills'))return;
     const g=s=>{const e=$(s);return e?e.value:undefined;};
-    const before={vendor:b.vendor,account:b.account,amount:b.amount,inv:b.inv,gl:b.gl,due:b.due};
+    const before={vendor:b.vendor,account:b.account,amount:b.amount,inv:b.inv,gl:b.gl,due:b.due,comments:b.comments};
     const nv=(g('#e_vendor')||b.vendor),na=(g('#e_acct')||b.account),ninv=((g('#e_inv')||'').trim()||b.inv);
     const namt=parseFloat(g('#e_amt'));
     if(FAISAL.includes(na)&&b.method&&b.method==='ACH'){this.toast('Account '+na+' is check-only — change the method first');return;}
     b.vendor=nv;b.account=na;b.inv=ninv;b.gl=(g('#e_gl')||'').trim();b.due=mdyToISO(g('#e_due')||'');b.link=(g('#e_link')||'').trim();
+    if(g('#e_memo')!==undefined)b.comments=(g('#e_memo')||'').trim();
     const ninvd=mdyToISO(g('#e_invdate')||'');b.invoiceDate=ninvd;
     if(!isNaN(namt))b.amount=namt;
     if(canEdit('payments')){const m=g('#e_method');if(m)b.method=m;const pd=mdyToISO(g('#e_paydate')||'');if(pd){if(b.paid)b.paid.date=pd;else if(b.printed)b.printed.date=pd;}}
-    const chg=[];if(before.vendor!==b.vendor)chg.push('vendor');if(before.account!==b.account)chg.push('account');if(+before.amount!==+b.amount)chg.push('amount');if(before.inv!==b.inv)chg.push('invoice');if(before.gl!==b.gl)chg.push('GL');if(before.due!==b.due)chg.push('due');
+    const chg=[];if(before.vendor!==b.vendor)chg.push('vendor');if(before.account!==b.account)chg.push('account');if(+before.amount!==+b.amount)chg.push('amount');if(before.inv!==b.inv)chg.push('invoice');if(before.gl!==b.gl)chg.push('GL');if(before.due!==b.due)chg.push('due');if((before.comments||'')!==(b.comments||''))chg.push('memo');
     this.logBill(b,'Edited',b.vendor+(chg.length?' · '+chg.join(', '):' · details'));
     this.persist();this.syncBill(b);this.closeDrawer();this.toast('#'+b.id+' updated');this.render();
   },
