@@ -126,7 +126,7 @@ function verifyPw(pw, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-const sanitize = (u) => ({ u: u.u, name: u.name, role: u.role, initials: u.initials, inTraining: !!u.inTraining, tier: u.role === 'admin' ? undefined : (Number(u.tier) || 1) });
+const sanitize = (u) => ({ u: u.u, name: u.name, role: u.role, initials: u.initials, inTraining: !!u.inTraining, tier: u.role === 'admin' ? undefined : (Number(u.tier) || 1), perms: u.role === 'admin' ? undefined : (Array.isArray(u.perms) ? u.perms : undefined) });
 
 // Loads users; seeds the default admin on first ever call so login works out of the box.
 async function getUsers(store) {
@@ -234,6 +234,7 @@ export default async (req) => {
       initials: (inc.initials ?? base.initials ?? uname.slice(0, 2)).toUpperCase(),
       inTraining: inc.inTraining ?? base.inTraining ?? false,
       tier: (inc.role ?? base.role) === 'admin' ? undefined : (Number(inc.tier ?? base.tier) || 1),
+      perms: (inc.role ?? base.role) === 'admin' ? undefined : (Array.isArray(inc.perms) ? inc.perms : (Array.isArray(base.perms) ? base.perms : undefined)),
       pw: inc.password ? hashPw(inc.password) : base.pw,
     };
     if (!merged.pw) return json({ error: 'Password required for a new user' }, 400);
