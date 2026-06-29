@@ -1805,7 +1805,7 @@ const App={
   },
   saveEditBill(id){const b=BILLS.find(x=>x.id===+id);if(!b||!canEdit('bills'))return;
     const g=s=>{const e=$(s);return e?e.value:undefined;};
-    const before={vendor:b.vendor,account:b.account,amount:b.amount,inv:b.inv,gl:b.gl,due:b.due,comments:b.comments};
+    const before={vendor:b.vendor,account:b.account,amount:b.amount,inv:b.inv,gl:b.gl,due:b.due,invoiceDate:b.invoiceDate,link:b.link,method:b.method,comments:b.comments};
     const nv=(g('#e_vendor')||b.vendor),na=(g('#e_acct')||b.account),ninv=((g('#e_inv')||'').trim()||b.inv);
     const namt=parseFloat(g('#e_amt'));
     if(FAISAL.includes(na)&&b.method&&b.method==='ACH'){this.toast('Account '+na+' is check-only — change the method first');return;}
@@ -1814,8 +1814,20 @@ const App={
     const ninvd=mdyToISO(g('#e_invdate')||'');b.invoiceDate=ninvd;
     if(!isNaN(namt))b.amount=namt;
     if(canEdit('payments')){const m=g('#e_method');if(m)b.method=m;const pd=mdyToISO(g('#e_paydate')||'');if(pd){if(b.paid)b.paid.date=pd;else if(b.printed)b.printed.date=pd;}}
-    const chg=[];if(before.vendor!==b.vendor)chg.push('vendor');if(before.account!==b.account)chg.push('account');if(+before.amount!==+b.amount)chg.push('amount');if(before.inv!==b.inv)chg.push('invoice');if(before.gl!==b.gl)chg.push('GL');if(before.due!==b.due)chg.push('due');if((before.comments||'')!==(b.comments||''))chg.push('memo');
-    this.logBill(b,'Edited',b.vendor+(chg.length?' · '+chg.join(', '):' · details'));
+    const chg=[];
+    const fmtv=(k,val)=>{if(val==null||val==='')return '—';if(k==='amount')return money(val);if(k==='due'||k==='invoiceDate')return fmtD(val);if(k==='memo'){const s=String(val);return '“'+s.slice(0,40)+(s.length>40?'…':'')+'”';}return String(val);};
+    const diff=(label,k,o,n)=>{const same=(k==='amount')?(+o===+n):((o||'')===(n||''));if(!same)chg.push(label+': '+fmtv(k,o)+' → '+fmtv(k,n));};
+    diff('vendor','vendor',before.vendor,b.vendor);
+    diff('account','account',before.account,b.account);
+    diff('amount','amount',before.amount,b.amount);
+    diff('invoice #','inv',before.inv,b.inv);
+    diff('GL','gl',before.gl,b.gl);
+    diff('invoice date','invoiceDate',before.invoiceDate,b.invoiceDate);
+    diff('due','due',before.due,b.due);
+    diff('link','link',before.link,b.link);
+    diff('method','method',before.method,b.method);
+    diff('memo','memo',before.comments,b.comments);
+    this.logBill(b,'Edited',chg.length?chg.join(' · '):b.vendor+' · details');
     this.persist();this.syncBill(b);this.closeDrawer();this.toast('#'+b.id+' updated');this.render();
   },
 
