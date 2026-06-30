@@ -923,12 +923,15 @@ const App={
         <td>${urgencyChip(b)||'<span style="color:var(--ink-3);font-size:12px">—</span>'}</td>
         <td class="r">${can('record')?nextAction(b):''}</td>
       </tr>`;
-    return `
-    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pending payment</h3><span class="sub">${pending.length} · checks stay here until sent</span></div>
+    const payTab=this.state.payTab||'pending';
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${[['pending','Pending payment',pending.length],['all','All payments',ptotal]].map(([k,l,n])=>`<button class="btn ${payTab===k?'btn-gold':'btn-ghost'} btn-sm" onclick="App.setPayTab('${k}')">${l} <span style="opacity:.7">(${n})</span></button>`).join('')}</div>`;
+    let body='';
+    if(payTab==='pending'){body=`
+    <div class="card"><div class="card-h"><h3>Pending payment</h3><span class="sub">${pending.length} · checks stay here until sent</span></div>
       ${can('record')&&batchable.length?`<div style="padding:10px 16px;border-bottom:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" onclick="App.toggleBatch()">${svg(ICN.dollar,13)} Batch pay by vendor ${this.state.showBatch?'▴ hide':'▾ show'} <span style="color:var(--ink-3)">· ${batchable.length} vendor${batchable.length!==1?'s':''} with 2+ bills</span></button>${this.state.showBatch?`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${batchable.map(([v,arr])=>`<button class="btn btn-ghost btn-sm" style="border:1px solid var(--gold)" onclick="App.openBatchPay('${v.replace(/'/g,"\\'")}')">Pay all ${v} <b>(${arr.length})</b> · ${money(arr.reduce((s,b)=>s+(+b.amount||0),0))}</button>`).join('')}</div>`:''}</div>`:''}
       <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th>Invoice</th><th class="r">Amount</th><th>Method</th><th>Due</th><th>Send status</th><th class="r"></th></tr></thead>
       <tbody>${pending.length?pending.map(prow).join(''):`<tr><td colspan="8"><div class="empty">${svg(ICN.card,30)}<div>Nothing pending. Approved bills land here.</div></div></td></tr>`}</tbody></table></div>
-    </div>
+    </div>`;}else{body=`
     <div class="filters">
       ${this.filterControls(false)}
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${ptotal} payment${ptotal!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="payments">${svg(ICN.bills,14)} Export Excel</button>`:''}</div>
@@ -945,8 +948,10 @@ const App={
         <td class="mono" style="font-size:12px">${b.checkNumber||(b.isChase&&b.tracking)||'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):(b.printed?fmtD(b.printed.date):'—'))}</td>
         <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||(b.printed&&b.printed.initials)||'—'}</td>
-      </tr>`).join(''):`<tr><td colspan="9"><div class="empty">${svg(ICN.check,30)}<div>No payments yet.</div></div></td></tr>`}</tbody></table></div>${pmore>0?`<div style="padding:12px 16px;text-align:center;border-top:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" data-more="pay">Show ${Math.min(150,pmore)} more · ${pmore} hidden</button> <span style="font-size:12px;color:var(--ink-3);margin-left:8px">Tip: use search or filters to narrow down</span></div>`:''}</div>`;
+      </tr>`).join(''):`<tr><td colspan="9"><div class="empty">${svg(ICN.check,30)}<div>No payments yet.</div></div></td></tr>`}</tbody></table></div></div>`;}
+    return tabBar+body;
   },
+  setPayTab(t){this.state.payTab=t;this.render();},
 
   /* ---------- PICKUPS (printed → cut → ready for pickup → picked up) ---------- */
   v_pickups(){
