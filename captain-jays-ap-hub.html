@@ -661,6 +661,7 @@ const App={
     // --- Manage ---
     it.push({id:'vendors',label:'Vendors',ic:'vendor',section:'Manage'});
     it.push({id:'eom',label:'EOM Tracker',ic:'cal',section:'Manage'});
+    it.push({id:'reports',label:'Reports',ic:'bills',section:'Manage'});
     if(CURRENT.role==='admin') it.push({id:'accounts',label:'Accounts',ic:'entity',section:'Manage'});
     // --- Admin ---
     if(CURRENT.role==='admin'){it.push({id:'users',label:'Users',ic:'users',section:'Admin'});it.push({id:'activity',label:'Activity',ic:'audit',section:'Admin'});it.push({id:'deleted',label:'Deleted',ic:'trash',section:'Admin',badge:()=>(DELETED.bills.length+DELETED.vendors.length)||null});it.push({id:'settings',label:'Admin Settings',ic:'bolt',section:'Admin'});}
@@ -721,7 +722,7 @@ const App={
 
   render(){if(!CURRENT)return;
     const titles={dashboard:['Dashboard',CURRENT.name+' · '+ROLES[CURRENT.role]],submissions:['Submissions','Trainee entries awaiting submit'],
-      approvals:['Approvals','Bills routed to you for sign-off'],inbox:['Inbox','New bills to code and route'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],
+      approvals:['Approvals','Bills routed to you for sign-off'],inbox:['Inbox','New bills to code and route'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],reports:['Reports','AP aging, spend, and vendor totals'],
       payments:['Payments','All payments — make payment & track status'],checks:['Checks Processing','Print, cut, then deposit Chase checks'],tracking:['Tracking','Checks to mail — sent & delivery status'],pickups:['Pickups','Checks to be collected'],
       vendors:['Vendors','Master list · active & inactive'],accounts:['Accounts','Store & entity codes'],users:['Users','Logins & access'],activity:['Activity','Logins & every action — saved'],deleted:['Deleted','Recoverable — admin only']};
     $('#vTitle').textContent=(titles[this.state.view]||[''])[0];
@@ -983,7 +984,7 @@ const App={
     const toSend=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&b.checkStage==='send');
     const toDep=BILLS.filter(b=>b.isChase&&b.chaseStage==='deposit');
     const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
-    const tabs=[['cut','To Cut',toCut.length],['print','To Print · Chase',toPrint.length],['deposit','To Deposit · Chase',toDep.length]];
+    const tabs=[['cut','To Cut',toCut.length],['print','To Print',toPrint.length],['deposit','To Deposit · Chase',toDep.length]];
     const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-checktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}<div style="margin-left:auto;font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px">${svg(ICN.bolt,12)} One step per click · batches of ${CHECK_BATCH}</div></div>`;
     const nameCell=b=>b.isChase?`<div class="vendorcell"><div class="vlogo" style="background:#efe9fb;color:#7c3aed">CH</div><div class="vmeta"><b>Chase · ${b.account}</b><span>${b.connected.length} bill${b.connected.length!==1?'s':''}</span></div></div>`:`<div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div>`;
     let body='';
@@ -992,7 +993,7 @@ const App={
       const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'kind':return b.isChase?'CHASE':(b.method||'');default:return (b.isChase?'chase '+b.account:b.vendor||'').toLowerCase();}};
       const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
       const rows=toPrint.slice().sort((a,b)=>{const x=tval(a),y=tval(b);return (x<y?-1:x>y?1:a.id-b.id)*tdir;});
-      body=`<div class="card"><div class="card-h"><h3>To Print · Chase</h3><span class="sub">${money(sum(toPrint))} · ${toPrint.length}</span></div>
+      body=`<div class="card"><div class="card-h"><h3>To Print</h3><span class="sub">${money(sum(toPrint))} · ${toPrint.length}</span></div>
       <div class="tablewrap"><table><thead><tr>${th('account','Account')}${th('vendor','Type')}${th('amount','Amount','r')}${th('kind','Kind')}<th class="r"></th></tr></thead>
       <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td style="font-size:12px">${b.isChase?'<span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':b.method}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-print="${b.id}">${svg(ICN.check,13)} Print check</button>`:''}</td></tr>`).join(''):`<tr><td colspan="5"><div class="empty">${svg(ICN.check,30)}<div>No Chase checks to print. Regular checks are printed from <b>Pay Bill</b> and arrive in To Cut.</div></div></td></tr>`}</tbody></table></div></div>`;
     } else if(tab==='cut'){
@@ -1260,6 +1261,56 @@ const App={
   },
 
   /* ---------- ACCOUNTS ---------- */
+  setReportTab(t){this.state.reportTab=t;this.render();},
+  reportData(){
+    const open=BILLS.filter(b=>!b.isChase&&billUnpaid(b));
+    const paid=BILLS.filter(b=>!b.isChase&&b.stage==='paid');
+    const now=Date.now();
+    const ag={};
+    open.forEach(b=>{const v=b.vendor||'(none)';ag[v]=ag[v]||{vendor:v,current:0,d1_30:0,d31_60:0,d61_90:0,d90:0,total:0};
+      const days=b.due?Math.floor((now-new Date(b.due+'T00:00').getTime())/86400000):0;
+      const k=days<=0?'current':days<=30?'d1_30':days<=60?'d31_60':days<=90?'d61_90':'d90';
+      const amt=+b.amount||0;ag[v][k]+=amt;ag[v].total+=amt;});
+    const aging=Object.values(ag).sort((a,b)=>b.total-a.total);
+    const glm={};paid.forEach(b=>{const g=b.gl||'(uncoded)';glm[g]=(glm[g]||0)+(+b.amount||0);});
+    const spendGl=Object.entries(glm).map(([gl,amt])=>({gl,amt})).sort((a,b)=>b.amt-a.amt);
+    const vsm={};paid.forEach(b=>{const v=b.vendor||'(none)';vsm[v]=vsm[v]||{vendor:v,count:0,total:0};vsm[v].count++;vsm[v].total+=(+b.amount||0);});
+    const vendorSpend=Object.values(vsm).sort((a,b)=>b.total-a.total);
+    return {aging,spendGl,vendorSpend};
+  },
+  downloadReport(tab){
+    const d=this.reportData();let cols,rows,name;const f=n=>(+n||0).toFixed(2);
+    if(tab==='gl'){name='spend-by-gl';cols=['GL account','Total paid'];rows=d.spendGl.map(r=>[r.gl,f(r.amt)]);}
+    else if(tab==='vendor'){name='vendor-spend';cols=['Vendor','Bills','Total paid'];rows=d.vendorSpend.map(r=>[r.vendor,r.count,f(r.total)]);}
+    else{name='ap-aging';cols=['Vendor','Current','1-30','31-60','61-90','90+','Total'];rows=d.aging.map(r=>[r.vendor,f(r.current),f(r.d1_30),f(r.d31_60),f(r.d61_90),f(r.d90),f(r.total)]);}
+    const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+    const csv=[cols.join(','),...rows.map(r=>r.map(esc).join(','))].join('\n');
+    const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');
+    a.href=url;a.download=name+'-'+todayISO+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    this.toast('Downloaded '+name+'.csv');
+  },
+  v_reports(){
+    const tab=this.state.reportTab||'aging';const d=this.reportData();
+    const tabs=[['aging','AP aging'],['gl','Spend by GL'],['vendor','Vendor spend']];
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" onclick="App.setReportTab('${k}')">${l}</button>`).join('')}<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="App.downloadReport('${tab}')">${svg(ICN.arrow,14)} Download CSV</button></div>`;
+    let body='';
+    if(tab==='aging'){
+      body=`<div class="card"><div class="card-h"><h3>AP aging</h3><span class="sub">${d.aging.length} vendor${d.aging.length!==1?'s':''} with open balances</span></div>
+        <div class="tablewrap"><table><thead><tr><th>Vendor</th><th class="r">Current</th><th class="r">1–30</th><th class="r">31–60</th><th class="r">61–90</th><th class="r">90+</th><th class="r">Total</th></tr></thead>
+        <tbody>${d.aging.length?d.aging.map(r=>`<tr><td>${r.vendor}</td><td class="r mono">${r.current?money(r.current):'—'}</td><td class="r mono">${r.d1_30?money(r.d1_30):'—'}</td><td class="r mono">${r.d31_60?money(r.d31_60):'—'}</td><td class="r mono">${r.d61_90?money(r.d61_90):'—'}</td><td class="r mono"${r.d90?' style="color:var(--red);font-weight:600"':''}>${r.d90?money(r.d90):'—'}</td><td class="r mono" style="font-weight:700">${money(r.total)}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.check,28)}<div>No open bills — nothing aging.</div></div></td></tr>`}</tbody></table></div></div>`;
+    }else if(tab==='gl'){
+      const tot=d.spendGl.reduce((a,r)=>a+r.amt,0);
+      body=`<div class="card"><div class="card-h"><h3>Spend by GL account</h3><span class="sub">paid bills · ${money(tot)}</span></div>
+        <div class="tablewrap"><table><thead><tr><th>GL account</th><th class="r">Total paid</th></tr></thead>
+        <tbody>${d.spendGl.length?d.spendGl.map(r=>`<tr><td>${r.gl}</td><td class="r mono" style="font-weight:600">${money(r.amt)}</td></tr>`).join(''):`<tr><td colspan="2"><div class="empty">No paid bills yet.</div></td></tr>`}</tbody></table></div></div>`;
+    }else{
+      const tot=d.vendorSpend.reduce((a,r)=>a+r.total,0);
+      body=`<div class="card"><div class="card-h"><h3>Vendor spend</h3><span class="sub">all-time paid · ${money(tot)} · use for 1099 prep</span></div>
+        <div class="tablewrap"><table><thead><tr><th>Vendor</th><th class="r">Bills</th><th class="r">Total paid</th></tr></thead>
+        <tbody>${d.vendorSpend.length?d.vendorSpend.map(r=>`<tr class="click" onclick="App.openVendorView('${r.vendor.replace(/'/g,"\\'")}')"><td><b style="color:var(--blue)">${r.vendor}</b></td><td class="r mono">${r.count}</td><td class="r mono" style="font-weight:600">${money(r.total)}</td></tr>`).join(''):`<tr><td colspan="3"><div class="empty">No paid bills yet.</div></td></tr>`}</tbody></table></div></div>`;
+    }
+    return tabBar+body;
+  },
   v_settings(){
     if(CURRENT.role!=='admin')return '<div class="empty">Admins only.</div>';
     const lastBackup=this._lastBackupAt?fmtD(this._lastBackupAt):'—';
