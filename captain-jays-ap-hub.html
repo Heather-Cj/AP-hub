@@ -643,8 +643,8 @@ const App={
   /* ---------- nav ---------- */
   navItems(){
     const it=[{id:'dashboard',label:'Dashboard',ic:'grid'}];
-    it.push({id:'submissions',label:'Submissions',ic:'inbox',badge:()=>BILLS.filter(b=>b.stage==='submission').length||null});
     if(this.canApproveAny()) it.push({id:'approvals',label:'Approvals',ic:'check',badge:()=>BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b)).length||null});
+    it.push({id:'inbox',label:'Inbox',ic:'inbox',section:'Bills',badge:()=>this.scoped().filter(b=>b.stage==='submission').length||null});
     it.push({id:'bills',label:'All bills',ic:'bills',section:'Bills',badge:()=>this.scoped().length||null});
     it.push({id:'unpaid',label:'Unpaid bills',ic:'bills',section:'Bills',badge:()=>this.scoped().filter(b=>billUnpaid(b)).length||null});
     if(can('record')) it.push({id:'payments',label:'Payments',ic:'card',badge:()=>BILLS.filter(b=>b.stage==='ready'&&!b.payType&&!b.isChase).length||null});
@@ -702,7 +702,7 @@ const App={
 
   render(){if(!CURRENT)return;
     const titles={dashboard:['Dashboard',CURRENT.name+' · '+ROLES[CURRENT.role]],submissions:['Submissions','Trainee entries awaiting submit'],
-      approvals:['Approvals','Bills routed to you for sign-off'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],
+      approvals:['Approvals','Bills routed to you for sign-off'],inbox:['Inbox','New bills to code and route'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],
       payments:['Payments','All payments — make payment & track status'],checks:['Checks Processing','Print, cut, then deposit Chase checks'],tracking:['Tracking','Checks to mail — sent & delivery status'],pickups:['Pickups','Checks to be collected'],
       vendors:['Vendors','Master list · active & inactive'],accounts:['Accounts','Store & entity codes'],users:['Users','Logins & access'],activity:['Activity','Logins & every action — saved'],deleted:['Deleted','Recoverable — admin only']};
     $('#vTitle').textContent=(titles[this.state.view]||[''])[0];
@@ -774,6 +774,25 @@ const App={
   },
 
   /* ---------- SUBMISSIONS (trainee entries — anyone can approve) ---------- */
+  v_inbox(){
+    const items=this.scoped().filter(b=>b.stage==='submission');
+    const rows=items.slice().sort((a,b)=>(b.receivedDate||'').localeCompare(a.receivedDate||'')||b.id-a.id);
+    const canRoute=CURRENT.role==='admin'||this.canApproveAny();
+    return `
+    <div class="filters" style="flex-wrap:wrap;gap:8px">
+      <span style="color:var(--ink-3);font-size:13px"><b style="color:var(--ink-2)">${items.length}</b> bill${items.length!==1?'s':''} to code</span>
+      <div style="margin-left:auto;display:flex;gap:8px">${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div>
+    </div>
+    ${rows.length?`<div style="display:flex;flex-direction:column;gap:8px">${rows.map(b=>`<div class="card click" data-bill="${b.id}" style="display:flex;align-items:center;gap:14px;padding:13px 18px;cursor:pointer">
+      <div class="vlogo">${abbr(b.vendor)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;color:var(--ink-1)">${b.vendor}</div>
+        <div style="font-size:12.5px;color:var(--ink-3);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="entity-chip" style="font-size:11px"><span class="pin"></span>${b.account}</span><span>${invOf(b)}</span><span>received ${b.receivedDate?fmtD(b.receivedDate):'—'}</span><span>by ${b.enteredInitials||'—'}</span>${b.link?`<span style="color:var(--blue);display:inline-flex;align-items:center;gap:3px">${svg(ICN.bills,12)} document</span>`:''}</div>
+      </div>
+      <div class="mono" style="font-weight:700;font-size:15px;white-space:nowrap">${money(b.amount)}</div>
+      ${canRoute?`<button class="btn btn-gold btn-sm" onclick="event.stopPropagation();App.approveSubmission(${b.id})">${svg(ICN.check,13)} Code &amp; route</button>`:''}
+    </div>`).join('')}</div>`:`<div class="card"><div class="empty" style="padding:42px 20px">${svg(ICN.inbox,34)}<div style="margin-top:10px;font-weight:600;color:var(--ink-1)">Inbox is empty</div><div style="font-size:13px;color:var(--ink-3);margin-top:5px;max-width:440px;margin-left:auto;margin-right:auto;line-height:1.5">New bills land here to be coded and routed. Once email intake is connected, anything emailed to your AP address will appear here too.</div>${can('create')?`<button class="btn btn-gold btn-sm" style="margin-top:16px" data-new>${svg(ICN.plus,14)} Add a bill</button>`:''}</div></div>`}`;
+  },
   v_submissions(){
     const rows=this.applySort(BILLS.filter(b=>b.stage==='submission'&&this.matchBill(b)));
     return `
