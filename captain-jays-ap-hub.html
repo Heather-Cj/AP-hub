@@ -914,18 +914,21 @@ const App={
       if(b.checkStage==='send')return (can('record')||can('send'))?`<button class="btn btn-gold" data-send="${b.id}" style="flex-shrink:0">${svg(ICN.truck,15)} Send</button>`:'';
       return '';
     };
-    const card=b=>`<div class="card" style="${rowBg(b)}"><div style="padding:14px 16px;display:flex;align-items:center;gap:14px">
-        <div class="vlogo" style="width:40px;height:40px;border-radius:11px;flex-shrink:0">${abbr(b.vendor)}</div>
-        <div class="click" data-bill="${b.id}" style="flex:1;min-width:0;cursor:pointer">
-          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:22px;font-weight:800;color:var(--ink-1)">${money(b.amount)}</span><span class="entity-chip"><span class="pin"></span>${b.account}</span><b style="font-size:14px;color:var(--ink-1)">${b.vendor}</b>${b.payType==='check'?statusBadge(b):''}</div>
-          <div style="font-size:12px;color:var(--ink-3);margin-top:2px">Invoice ${invOf(b)} · ${b.method||'method set at payment'}${b.checkNumber?' · check '+b.checkNumber:''}${b.due?' · due '+fmtD(b.due):''} ${urgencyChip(b)}</div>
-        </div>
-        ${can('record')?nextAction(b):''}
-      </div></div>`;
+    const prow=b=>`<tr class="click" data-bill="${b.id}">
+        <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
+        <td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td>
+        <td class="mono" style="font-size:12px">${invOf(b)}</td>
+        <td class="r mono" style="font-weight:700">${money(b.amount)}</td>
+        <td style="font-size:12.5px">${b.method||(()=>{const vd=vendor(b.vendor);return vd&&vd.m?`<span style="color:var(--ink-3)">${vd.m==='To be Picked Up'?'Pickup':vd.m} <span style="font-size:10px">· default</span></span>`:'<span style="color:var(--ink-3)">at payment</span>';})()}${b.payType==='check'?' '+statusBadge(b):''}${b.checkNumber?' <span class="mono" style="color:var(--ink-3);font-size:11px">#'+b.checkNumber+'</span>':''}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td>
+        <td>${urgencyChip(b)||'<span style="color:var(--ink-3);font-size:12px">—</span>'}</td>
+        <td class="r">${can('record')?nextAction(b):''}</td>
+      </tr>`;
     return `
-    <div class="card" style="margin-bottom:18px;background:linear-gradient(180deg,var(--surface),var(--surface-2))"><div class="card-h"><h3>Pending payment</h3><span class="sub">${pending.length} · checks stay here until sent</span></div>
-      ${can('record')&&batchable.length?`<div style="padding:12px 16px 2px;display:flex;flex-wrap:wrap;gap:8px">${batchable.map(([v,arr])=>`<button class="btn btn-ghost btn-sm" style="border:1px dashed var(--gold);color:var(--ink-1)" onclick="App.openBatchPay('${v.replace(/'/g,"\\'")}')">${svg(ICN.dollar,13)} Pay all ${v} <b>(${arr.length})</b> · ${money(arr.reduce((s,b)=>s+(+b.amount||0),0))}</button>`).join('')}</div>`:''}
-      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">${pending.length?pending.map(card).join(''):`<div class="empty">${svg(ICN.card,30)}<div>Nothing pending. Approved bills land here.</div></div>`}</div>
+    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Pending payment</h3><span class="sub">${pending.length} · checks stay here until sent</span></div>
+      ${can('record')&&batchable.length?`<div style="padding:10px 16px;border-bottom:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" onclick="App.toggleBatch()">${svg(ICN.dollar,13)} Batch pay by vendor ${this.state.showBatch?'▴ hide':'▾ show'} <span style="color:var(--ink-3)">· ${batchable.length} vendor${batchable.length!==1?'s':''} with 2+ bills</span></button>${this.state.showBatch?`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${batchable.map(([v,arr])=>`<button class="btn btn-ghost btn-sm" style="border:1px solid var(--gold)" onclick="App.openBatchPay('${v.replace(/'/g,"\\'")}')">Pay all ${v} <b>(${arr.length})</b> · ${money(arr.reduce((s,b)=>s+(+b.amount||0),0))}</button>`).join('')}</div>`:''}</div>`:''}
+      <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th>Invoice</th><th class="r">Amount</th><th>Method</th><th>Due</th><th>Send status</th><th class="r"></th></tr></thead>
+      <tbody>${pending.length?pending.map(prow).join(''):`<tr><td colspan="8"><div class="empty">${svg(ICN.card,30)}<div>Nothing pending. Approved bills land here.</div></div></td></tr>`}</tbody></table></div>
     </div>
     <div class="filters">
       ${this.filterControls(false)}
@@ -1263,6 +1266,7 @@ const App={
   /* ---------- ACCOUNTS ---------- */
   setReportTab(t){this.state.reportTab=t;this.render();},
   toggleReadiness(){this.state.showReadiness=!this.state.showReadiness;this.render();},
+  toggleBatch(){this.state.showBatch=!this.state.showBatch;this.render();},
   reportData(){
     const open=BILLS.filter(b=>!b.isChase&&billUnpaid(b));
     const paid=BILLS.filter(b=>!b.isChase&&b.stage==='paid');
