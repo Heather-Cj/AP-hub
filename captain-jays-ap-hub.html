@@ -682,7 +682,7 @@ const App={
     $('#navItems').querySelectorAll('[data-navsec]').forEach(b=>b.onclick=()=>{const k=b.dataset.navsec;this.state.navClosed[k]=!this.state.navClosed[k];this.renderNav();this.setActive();});
   },
   setActive(){$('#navItems').querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.go===this.state.view))},
-  go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.state.billLimit=150;this.state.payLimit=150;this.state.vendorView=null;if(v==='bills')this.state.month=monthKey(todayISO);if(v==='unpaid')this.state.month='all';this.render()},
+  go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.state.billLimit=150;this.state.payLimit=150;this.state.vendorView=null;if(v==='bills'||v==='payments')this.state.month=monthKey(todayISO);if(v==='unpaid')this.state.month='all';this.render()},
 
   mine(b){return CURRENT.role==='admin'||can('view_all')?true:b.enteredBy===CURRENT.u;},
   routed(b){if(CURRENT.role==='admin')return true;return !b.approval||!b.approval.approver||b.approval.approver===CURRENT.u;},
@@ -904,9 +904,8 @@ const App={
     let allp=BILLS.filter(b=>this.matchBill(b)&&(b.paid||b.payType==='check'||b.isChase));
     allp=this.applySort(allp);
     const ptotal=allp.length;
-    const plim=this.state.payLimit||150;
-    const pshown=allp.slice(0,plim);
-    const pmore=ptotal-pshown.length;
+    const pshown=allp;
+    const pmore=0;
     const rowBg=b=>{const u=sendUrgency(b);return u.level==='red'?'background:rgba(220,38,38,.06)':u.level==='amber'?'background:rgba(217,119,6,.06)':'';};
     const nextAction=b=>{
       if(!b.payType)return `<button class="btn btn-gold" data-record="${b.id}" style="flex-shrink:0">${svg(ICN.dollar,15)} Pay Bill</button>`;
