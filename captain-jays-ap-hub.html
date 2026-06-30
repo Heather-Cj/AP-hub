@@ -1209,7 +1209,9 @@ const App={
   closeVendorView(){this.state.vendorView=null;this.render();},
   setVTab(t){this.state.vTab=t;this.render();},
   addVendorIssue(name){const v=vendor(name);if(!v||!can('vendors_add'))return;const t=($('#vissue_text')?$('#vissue_text').value:'').trim();if(!t){this.toast('Describe the issue first');return;}const assignee=($('#vissue_assignee')?$('#vissue_assignee').value:'')||'';(v.issues=v.issues||[]).push({id:Date.now(),at:Date.now(),by:CURRENT.initials,text:t,assignee,status:'open'});this.log('Vendor issue opened',v.n+' → '+((USERS.find(u=>u.u===assignee)||{}).name||assignee||'unassigned'));this.persist();this.toast('Issue added');this.render();},
-  resolveVendorIssue(name,id){const v=vendor(name);if(!v||!can('vendors_add')||!v.issues)return;const it=v.issues.find(x=>x.id===id);if(it){it.status='resolved';it.resolvedAt=Date.now();it.resolvedBy=CURRENT.initials;this.log('Vendor issue resolved',v.n);}this.persist();this.render();},
+  resolveVendorIssue(name,id){const v=vendor(name);if(!v||!can('vendors_add')||!v.issues)return;const it=v.issues.find(x=>x.id===id);if(it){it.status='resolved';it.resolvedAt=Date.now();it.resolvedBy=CURRENT.initials;this.log('Vendor issue resolved',v.n);
+    if(it.billId){const b=BILLS.find(x=>x.id===it.billId);if(b&&b.stage==='issue'){b.issue=null;b._preIssue=null;this.routeAfterEntry(b);this.logBill(b,'Issue resolved',b.vendor+' · '+(b.stage==='pending'?'→ approval':'→ ready for payment'));}}}
+    this.persist();this.render();},
   reopenVendorIssue(name,id){const v=vendor(name);if(!v||!can('vendors_add')||!v.issues)return;const it=v.issues.find(x=>x.id===id);if(it){it.status='open';it.resolvedAt=null;}this.persist();this.render();},
   delVendorIssue(name,id){const v=vendor(name);if(!v||!canDelete()||!v.issues)return;v.issues=v.issues.filter(x=>x.id!==id);this.persist();this.render();},
   addVendorNote(name){const v=vendor(name);if(!v||!can('vendors_add'))return;const t=($('#vnote_input')?$('#vnote_input').value:'').trim();if(!t){this.toast('Type a note first');return;}(v.notes=v.notes||[]).push({at:Date.now(),by:CURRENT.initials,text:t});this.log('Added vendor note',v.n);this.persist();this.toast('Note added');this.render();},
@@ -1261,7 +1263,7 @@ const App={
     </div>`;
     const issuesCard=`<div class="card" style="padding:18px 20px">
       <div class="card-h" style="padding:0 0 10px"><h3>Ongoing issues</h3><span class="sub">${openIss.length} open${issues.length>openIss.length?' · '+(issues.length-openIss.length)+' resolved':''}</span></div>
-      ${issues.length?issues.slice().sort((a,b)=>(a.status==='resolved'?1:0)-(b.status==='resolved'?1:0)||(b.at||0)-(a.at||0)).map(it=>`<div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-2);${it.status==='resolved'?'opacity:.6':''}"><div style="flex:1;min-width:0"><div style="font-size:13.5px;color:var(--ink-1);white-space:pre-wrap;${it.status==='resolved'?'text-decoration:line-through':''}">${escT(it.text)}</div><div style="font-size:11.5px;color:var(--ink-3);margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge ${it.status==='resolved'?'b-green':'b-amber'}" style="font-size:9px"><span class="dot"></span>${it.status==='resolved'?'Resolved':'Open'}</span><span>Assigned to <b style="color:var(--ink-2)">${userName(it.assignee)}</b></span><span>· opened by ${it.by||'—'} · ${dOf(it.at)}</span></div></div>${can('vendors_add')?`<div style="display:flex;gap:6px;align-items:flex-start;flex-shrink:0">${it.status==='resolved'?`<button class="btn btn-ghost btn-sm" onclick="App.reopenVendorIssue('${esc}',${it.id})">Reopen</button>`:`<button class="btn btn-ghost btn-sm" onclick="App.resolveVendorIssue('${esc}',${it.id})">${svg(ICN.check,12)} Resolve</button>`}${canDelete()?`<button class="btn btn-ghost btn-sm" onclick="App.delVendorIssue('${esc}',${it.id})">${svg(ICN.x,12)}</button>`:''}</div>`:''}</div>`).join(''):'<div style="font-size:13px;color:var(--ink-3);padding:6px 0 12px">No issues logged. Track open problems with this vendor — wrong charges, disputes, service issues — and assign each to whoever is handling it.</div>'}
+      ${issues.length?issues.slice().sort((a,b)=>(a.status==='resolved'?1:0)-(b.status==='resolved'?1:0)||(b.at||0)-(a.at||0)).map(it=>`<div style="display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-2);${it.status==='resolved'?'opacity:.6':''}"><div style="flex:1;min-width:0"><div style="font-size:13.5px;color:var(--ink-1);white-space:pre-wrap;${it.status==='resolved'?'text-decoration:line-through':''}">${escT(it.text)}</div><div style="font-size:11.5px;color:var(--ink-3);margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge ${it.status==='resolved'?'b-green':'b-amber'}" style="font-size:9px"><span class="dot"></span>${it.status==='resolved'?'Resolved':'Open'}</span>${it.billId?`<span class="badge b-blue" style="font-size:9px;cursor:pointer" onclick="event.stopPropagation();App.openBill(${it.billId})">${svg(ICN.bills,9)} Bill #${it.billId}</span>`:''}<span>Assigned to <b style="color:var(--ink-2)">${userName(it.assignee)}</b></span><span>· opened by ${it.by||'—'} · ${dOf(it.at)}</span></div></div>${can('vendors_add')?`<div style="display:flex;gap:6px;align-items:flex-start;flex-shrink:0">${it.status==='resolved'?`<button class="btn btn-ghost btn-sm" onclick="App.reopenVendorIssue('${esc}',${it.id})">Reopen</button>`:`<button class="btn btn-ghost btn-sm" onclick="App.resolveVendorIssue('${esc}',${it.id})">${svg(ICN.check,12)} Resolve</button>`}${canDelete()?`<button class="btn btn-ghost btn-sm" onclick="App.delVendorIssue('${esc}',${it.id})">${svg(ICN.x,12)}</button>`:''}</div>`:''}</div>`).join(''):'<div style="font-size:13px;color:var(--ink-3);padding:6px 0 12px">No issues logged. Track open problems with this vendor — wrong charges, disputes, service issues — and assign each to whoever is handling it.</div>'}
       ${can('vendors_add')?`<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end"><div class="field" style="flex:1;min-width:200px;margin:0"><label style="font-size:12px;color:var(--ink-3)">New issue</label><div class="inp" style="padding:0"><textarea id="vissue_text" rows="2" placeholder="Describe the issue…" style="border:none;background:none;width:100%;font:inherit;padding:9px 11px;resize:vertical"></textarea></div></div><div class="field" style="width:170px;margin:0"><label style="font-size:12px;color:var(--ink-3)">Assign to</label><select id="vissue_assignee" class="selent" style="width:100%">${USERS.map(u=>`<option value="${u.u}" ${u.u===CURRENT.u?'selected':''}>${u.name}</option>`).join('')}</select></div><button class="btn btn-gold btn-sm" onclick="App.addVendorIssue('${esc}')">${svg(ICN.plus,13)} Add issue</button></div>`:''}
     </div>`;
     const TABS=[['overview','Overview'],['bills','Bills ('+bills.length+')'],['notes','Notes'],['documents','Documents'],['issues','Ongoing issues'+(openIss.length?' ('+openIss.length+')':'')]];
@@ -1582,17 +1584,26 @@ const App={
   /* ---------- ongoing issues: hold a bill back / send it on ---------- */
   flagIssue(id){const b=BILLS.find(x=>x.id===id);if(!b)return;
     const prev=(b.issue&&b.issue.reason)||'';
-    const reason=(prompt('What is the issue with this bill? It will be held in Ongoing issues until resolved.',prev)||'').trim();
+    const reason=(prompt('What is the issue with this bill? It will be held in Ongoing issues and shown on the vendor until resolved.',prev)||'').trim();
     if(!reason)return;
     const reopen=b.stage!=='issue';
     b._preIssue=b._preIssue||{stage:b.stage,approval:b.approval};
     b.stage='issue';b.payType=null;
     b.issue={reason,by:CURRENT.initials,at:Date.now(),status:'open'};
+    // sync to the vendor's Ongoing issues (one issue per bill, linked by billId)
+    const v=vendor(b.vendor);
+    if(v){v.issues=v.issues||[];const txt='Bill #'+b.id+' '+invOf(b)+' · '+money(b.amount)+' — '+reason;
+      const it=v.issues.find(x=>x.billId===b.id);
+      if(it){it.text=txt;it.status='open';it.resolvedAt=null;it.at=Date.now();}
+      else v.issues.push({id:Date.now(),billId:b.id,at:Date.now(),by:CURRENT.initials,text:txt,assignee:'',status:'open'});
+    }
     this.logBill(b,reopen?'Flagged issue':'Updated issue note',reason);
     this.persist();this.toast('Bill #'+b.id+' moved to Ongoing issues');this.render();
   },
   resolveIssue(id){const b=BILLS.find(x=>x.id===id);if(!b||b.stage!=='issue')return;
     b.issue=null;b._preIssue=null;
+    const v=vendor(b.vendor);
+    if(v&&v.issues){const it=v.issues.find(x=>x.billId===b.id&&x.status!=='resolved');if(it){it.status='resolved';it.resolvedAt=Date.now();it.resolvedBy=CURRENT.initials;}}
     this.routeAfterEntry(b);
     this.logBill(b,'Issue resolved',b.vendor+' · '+(b.stage==='pending'?'→ approval':'→ ready for payment'));
     this.persist();this.toast('Bill #'+b.id+(b.stage==='pending'?' sent for approval':' is ready for payment'));this.render();
