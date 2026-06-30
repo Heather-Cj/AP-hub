@@ -477,6 +477,20 @@ function depositBatchLabel(ch){const peers=BILLS.filter(b=>b.isChase&&b.chaseSta
 function sortBy(rows,key,dir){const s=dir==='desc'?-1:1;const val=(b)=>{switch(key){case 'id':return b.id;case 'amount':return +b.amount||0;case 'vendor':return (b.vendor||'').toLowerCase();case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'method':return (b.method||'').toLowerCase();case 'due':return b.due||'';case 'invdate':return b.invoiceDate||'';case 'date':return (b.paid&&b.paid.date)||(b.printed&&b.printed.date)||'';case 'check':return b.checkNumber||(b.isChase&&b.tracking)||'';case 'status':return (b.isChase?b.chaseStage:b.payType==='check'?b.checkStage:b.stage)||'';default:return b.id;}};return rows.slice().sort((a,b)=>{const x=val(a),y=val(b);if(x<y)return -1*s;if(x>y)return 1*s;return (a.id-b.id)*s;});}
 /* ---- monthly vendor+account totals ---- */
 const monthTotal=(vn,acct,mk)=>BILLS.filter(b=>!b.isChase&&b.vendor===vn&&b.account===acct&&monthKey(b.receivedDate)===mk).reduce((s,b)=>s+(+b.amount||0),0);
+function billIsUtility(b){if(!b)return false;const gl=String(b.gl||'').toLowerCase();if(gl==='utilities')return true;if(typeof VGL!=='undefined'&&b.vendor&&VGL[b.vendor]==='Utilities')return true;return false;}
+function billVariance(b){if(!b)return null;const base=b.receivedDate||todayISO;let last=monthTotal(b.vendor,b.account,prevMonthKey(base));
+  if(last<=0){const d=new Date(base+'T00:00');for(let i=2;i<=4&&last<=0;i++){const dd=new Date(d);dd.setMonth(dd.getMonth()-i);last=monthTotal(b.vendor,b.account,dd.toISOString().slice(0,7));}}
+  if(last<=0)return null;const curr=+b.amount||0,diff=curr-last,pct=last>0?diff/last*100:0,util=billIsUtility(b);
+  return {last,curr,diff,pct,util,flag:util?Math.abs(pct)>5:Math.abs(diff)>5};}
+function varianceNote(b){const v=billVariance(b);if(!v)return '';
+  const up=v.diff>=0,sign=up?'+':'−',amt=money(Math.abs(v.diff)),pct=Math.abs(v.pct).toFixed(0),last=money(v.last);
+  const box=(bg,bd,tx,icon,txt)=>`<div style="display:flex;gap:8px;align-items:flex-start;background:${bg};border:1px solid ${bd};border-radius:10px;padding:9px 12px;font-size:12.5px;color:${tx};margin-bottom:12px">${svg(icon,14)}<span>${txt}</span></div>`;
+  if(v.util){
+    if(Math.abs(v.pct)>5)return box('rgba(220,38,38,.06)','var(--red)','var(--red)',ICN.bolt,`<b>Utility variance ${sign}${pct}%</b> (${sign}${amt}) vs last month (${last}) — over the 5% range, please review.`);
+    return box('var(--surface-2)','var(--line)','var(--ink-2)',ICN.bolt,`Utility — ${sign}${amt} (${sign}${pct}%) vs last month (${last}). Within the normal 5% range.`);
+  }
+  if(v.flag)return box('rgba(245,158,11,.08)','var(--amber)','var(--amber)',ICN.bolt,`<b>${sign}${amt}</b> (${sign}${pct}%) vs last month (${last}) — over $5, please verify.`);
+  return box('var(--surface-2)','var(--line)','var(--ink-3)',ICN.check,`${sign}${amt} vs last month (${last}) — within $5.`);}
 
 /* ===== backend: Netlify Functions + Blobs ===== */
 // API endpoint: '/api' on Cloudflare Workers; falls back to the Netlify function path if present.
@@ -1406,7 +1420,8 @@ const App={
     this.openDrawerEl(`
       <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px">${abbr(b.vendor)}</div><div><div style="font-weight:700;font-size:15px">Review for approval</div><div style="font-size:12.5px;color:var(--ink-3)">#${b.id} · ${b.vendor} · ${money(b.amount)}</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
       <div class="dr-body">
-        <dl class="kv"><dt>Account</dt><dd><span class="entity-chip"><span class="pin"></span>${b.account}</span></dd><dt>Invoice #</dt><dd class="mono">${invOf(b)}</dd><dt>Invoice date</dt><dd class="mono">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</dd><dt>Amount</dt><dd class="mono" style="font-weight:700">${money(b.amount)}</dd><dt>GL</dt><dd>${b.gl||'—'}</dd><dt>Due</dt><dd class="mono">${b.due?fmtD(b.due):'—'}</dd><dt>Entered by</dt><dd>${b.enteredInitials}</dd></dl>
+        ${varianceNote(b)}
+        <dl class="kv"><dt>Account</dt><dd><span class="entity-chip"><span class="pin"></span>${b.account}</span></dd><dt>Invoice #</dt><dd class="mono">${invOf(b)}</dd><dt>Invoice date</dt><dd class="mono">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</dd><dt>Amount</dt><dd class="mono" style="font-weight:700">${money(b.amount)}</dd><dt>Last month</dt><dd class="mono">${(()=>{const v=billVariance(b);return v?money(v.last):'—';})()}</dd><dt>GL</dt><dd>${b.gl||'—'}</dd><dt>Due</dt><dd class="mono">${b.due?fmtD(b.due):'—'}</dd><dt>Entered by</dt><dd>${b.enteredInitials}</dd></dl>
         <div class="field" style="margin-top:14px"><label>Note / reason (optional)</label><div class="inp" style="padding:0"><input id="ap_note" placeholder="Required if rejecting" style="${inp}"></div></div>
       </div>
       <div class="dr-foot"><button class="btn btn-ghost" onclick="App.rejectBill(${b.id})" style="color:var(--red)">${svg(ICN.x,14)} Reject</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.approveBill(${b.id})">${svg(ICN.check,14)} Approve</button></div>`);
@@ -1606,6 +1621,7 @@ const App={
         <div style="font-size:34px;font-weight:800;color:#000;line-height:1.05">${money(b.amount)}</div>
         <div style="display:flex;align-items:center;gap:10px;margin:6px 0 4px;flex-wrap:wrap"><span class="entity-chip" style="font-weight:700"><span class="pin"></span>${b.account}</span><b style="font-size:15px;color:#000">${b.vendor}</b></div>
         ${b.link?`<a href="${b.link}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--blue);font-weight:600;margin-bottom:8px">View bill ${svg(ICN.arrow,13)}</a>`:''}
+        ${varianceNote(b)}
         <dl class="kv">
           <dt>Bill ID</dt><dd class="mono" style="font-weight:700">#${b.id}</dd>
           <dt>Invoice #</dt><dd class="mono">${invOf(b)}</dd>
