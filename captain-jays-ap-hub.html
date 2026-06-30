@@ -682,7 +682,7 @@ const App={
     $('#navItems').querySelectorAll('[data-navsec]').forEach(b=>b.onclick=()=>{const k=b.dataset.navsec;this.state.navClosed[k]=!this.state.navClosed[k];this.renderNav();this.setActive();});
   },
   setActive(){$('#navItems').querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.go===this.state.view))},
-  go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.state.billLimit=150;this.state.payLimit=150;this.state.vendorView=null;this.render()},
+  go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.state.billLimit=150;this.state.payLimit=150;this.state.vendorView=null;if(v==='bills')this.state.month=monthKey(todayISO);if(v==='unpaid')this.state.month='all';this.render()},
 
   mine(b){return CURRENT.role==='admin'||can('view_all')?true:b.enteredBy===CURRENT.u;},
   routed(b){if(CURRENT.role==='admin')return true;return !b.approval||!b.approval.approver||b.approval.approver===CURRENT.u;},
@@ -694,7 +694,7 @@ const App={
   setSort(k){const s=this.state;if(s.sortKey===k){s.sortDir=s.sortDir==='asc'?'desc':'asc';}else{s.sortKey=k;s.sortDir='asc';}this.render();},
   sortHdr(key,label,cls){const s=this.state;const on=s.sortKey===key;const ar=on?(s.sortDir==='asc'?' ▲':' ▼'):'';return `<th class="${cls||''}" data-sort="${key}" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${ar}</th>`;},
   applySort(rows){return sortBy(rows,this.state.sortKey,this.state.sortDir);},
-  monthsList(){const set={};BILLS.forEach(b=>{const mk=monthKey(b.receivedDate);if(mk)set[mk]=1;});return Object.keys(set).sort().reverse();},
+  monthsList(){const set={};BILLS.forEach(b=>{const mk=monthKey(b.receivedDate);if(mk)set[mk]=1;});set[monthKey(todayISO)]=1;return Object.keys(set).sort().reverse();},
   monthLabel(mk){if(!mk)return '';const p=mk.split('-');return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(+p[1])-1]+' '+p[0];},
   matchBill(b){const s=this.state;const q=(s.q||'').toLowerCase();
     if(s.acct!=='all'&&b.account!==s.acct)return false;
