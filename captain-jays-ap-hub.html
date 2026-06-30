@@ -125,10 +125,10 @@ button{font-family:inherit; cursor:pointer; border:none; background:none}
 .grid-2{display:grid;grid-template-columns:1.55fr 1fr;gap:18px}
 
 /* tables */
-.tablewrap{overflow-x:auto}
+.tablewrap{overflow:auto;max-height:calc(100vh - 200px)}
 table{width:100%;border-collapse:collapse}
 thead th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600;
-  text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface-2)}
+  text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface-2);position:sticky;top:0;z-index:3}
 tbody td{padding:12px 14px;border-bottom:1px solid var(--line-2);font-size:13px;vertical-align:middle}
 tbody tr{transition:background .1s}
 tbody tr:hover{background:var(--surface-2)}
