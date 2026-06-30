@@ -635,7 +635,8 @@ const App={
     const it=[{id:'dashboard',label:'Dashboard',ic:'grid'}];
     it.push({id:'submissions',label:'Submissions',ic:'inbox',badge:()=>BILLS.filter(b=>b.stage==='submission').length||null});
     if(this.canApproveAny()) it.push({id:'approvals',label:'Approvals',ic:'check',badge:()=>BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b)).length||null});
-    it.push({id:'bills',label:'All bills',ic:'bills',badge:()=>this.scoped().length||null});
+    it.push({id:'bills',label:'All bills',ic:'bills',section:'Bills',badge:()=>this.scoped().length||null});
+    it.push({id:'unpaid',label:'Unpaid bills',ic:'bills',section:'Bills',badge:()=>this.scoped().filter(b=>billOpen(b)).length||null});
     if(can('record')) it.push({id:'payments',label:'Payments',ic:'card',badge:()=>BILLS.filter(b=>b.stage==='ready'&&!b.payType&&!b.isChase).length||null});
     if(can('record')) it.push({id:'checks',label:'Checks Processing',ic:'check',badge:()=>BILLS.filter(b=>(b.isChase&&(b.chaseStage==='print'||b.chaseStage==='cut'||b.chaseStage==='deposit'))||(b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'))||(b.payType==='pickup'&&b.checkStage==='cut')).length||null});
     if(can('record')||can('create')) it.push({id:'tracking',label:'Tracking',ic:'truck',badge:()=>BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='send'||b.checkStage==='transit')).length||null});
@@ -646,7 +647,8 @@ const App={
     return it;
   },
   renderNav(){if(!CURRENT)return;
-    $('#navItems').innerHTML=`<div class="nav-group"><div class="nav-label">${ROLES[CURRENT.role]}</div>${this.navItems().map(it=>{const bv=it.badge?it.badge():null;return `<button class="nav-item" data-go="${it.id}">${svg(ICN[it.ic],17)}<span>${it.label}</span>${bv?`<span class="nav-badge">${bv}</span>`:''}</button>`}).join('')}</div>`;
+    let lastSec=null;
+    $('#navItems').innerHTML=`<div class="nav-group"><div class="nav-label">${ROLES[CURRENT.role]}</div>${this.navItems().map(it=>{const bv=it.badge?it.badge():null;let pre='';if(it.section&&it.section!==lastSec){pre=`<div class="nav-label" style="margin-top:12px">${it.section}</div>`;lastSec=it.section;}else if(!it.section){lastSec=null;}return pre+`<button class="nav-item" data-go="${it.id}">${svg(ICN[it.ic],17)}<span>${it.label}</span>${bv?`<span class="nav-badge">${bv}</span>`:''}</button>`}).join('')}</div>`;
     $('#navItems').querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{this.go(b.dataset.go);document.getElementById('nav').classList.remove('open')});
   },
   setActive(){$('#navItems').querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.go===this.state.view))},
@@ -690,7 +692,7 @@ const App={
 
   render(){if(!CURRENT)return;
     const titles={dashboard:['Dashboard',CURRENT.name+' · '+ROLES[CURRENT.role]],submissions:['Submissions','Trainee entries awaiting submit'],
-      approvals:['Approvals','Bills routed to you for sign-off'],bills:['All bills','Every bill across its lifecycle'],
+      approvals:['Approvals','Bills routed to you for sign-off'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],
       payments:['Payments','All payments — make payment & track status'],checks:['Checks Processing','Print, cut, then deposit Chase checks'],tracking:['Tracking','Checks to mail — sent & delivery status'],pickups:['Pickups','Checks to be collected'],
       vendors:['Vendors','Master list · active & inactive'],accounts:['Accounts','Store & entity codes'],users:['Users','Logins & access'],activity:['Activity','Logins & every action — saved'],deleted:['Deleted','Recoverable — admin only']};
     $('#vTitle').textContent=(titles[this.state.view]||[''])[0];
@@ -807,9 +809,10 @@ const App={
   },
 
   /* ---------- ALL BILLS ---------- */
+  v_unpaid(){this._unpaidOnly=true;const html=this.v_bills();this._unpaidOnly=false;return html;},
   v_bills(){
     const st=this.state.billStage;
-    let rows=this.scoped().filter(b=>this.matchBill(b)).filter(b=>st==='all'||this.statusKey(b)===st);
+    let rows=this.scoped().filter(b=>this.matchBill(b)).filter(b=>st==='all'||this.statusKey(b)===st).filter(b=>this._unpaidOnly?billOpen(b):true);
     rows=this.applySort(rows);
     const total=rows.length;
     const lim=this.state.billLimit||150;
