@@ -412,7 +412,7 @@ const billOpen=b=>!b.isChase&&b.stage!=='rejected'&&!billPaidInfo(b);
 // "Unpaid" = still genuinely awaiting payment. A cut check (has a check number)
 // or an already-recorded payment is NOT unpaid — those live in Checks/Tracking.
 const billUnpaid=b=>{
-  if(!b||b.isChase||b.stage==='rejected'||b.stage==='paid')return false;
+  if(!b||b.isChase||b.stage==='rejected'||b.stage==='paid'||b.stage==='issue')return false;
   if(billPaidInfo(b))return false;
   if(b.checkNumber)return false;
   if(b.payType==='online')return false;
@@ -455,7 +455,7 @@ const abbr=name=>(name||'').replace(/[^A-Za-z ]/g,'').split(/\s+/).filter(Boolea
    Online (ACH/DFD ACH/Credit Card/Amex) → Paid immediately.
    Check (Check/DFD Check) → To print → To cut → To send → On the way → Payment delivered.
    Chase reimbursement check → To print → To cut → To be deposited → Deposited. */
-const STAGES={submission:['b-gray','Pending Submission'],pending:['b-amber','Pending approval'],ready:['b-blue','Ready for payment'],paid:['b-green','Paid'],rejected:['b-red','Rejected']};
+const STAGES={submission:['b-gray','Pending Submission'],pending:['b-amber','Pending approval'],issue:['b-red','On hold · issue'],ready:['b-blue','Ready for payment'],paid:['b-green','Paid'],rejected:['b-red','Rejected']};
 const CHECK_STAGES={print:['b-blue','To print'],cut:['b-violet','To cut'],send:['b-amber','To send'],transit:['b-amber','On the way'],delivered:['b-green','Payment delivered']};
 const PICKUP_STAGES={print:['b-blue','To print'],cut:['b-violet','To cut'],pickup:['b-amber','Ready for pickup'],pickedup:['b-green','Picked up']};
 const CHASE_STAGES={print:['b-blue','Chase · to print'],cut:['b-violet','Chase · to cut'],deposit:['b-amber','Chase · to deposit'],closed:['b-green','Chase · deposited']};
@@ -650,6 +650,7 @@ const App={
     const it=[{id:'dashboard',label:'Dashboard',ic:'grid'}];
     it.push({id:'inbox',label:'Inbox',ic:'inbox',badge:()=>this.scoped().filter(b=>b.stage==='submission').length||null});
     if(this.canApproveAny()) it.push({id:'approvals',label:'Approvals',ic:'check',badge:()=>BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b)).length||null});
+    it.push({id:'issues',label:'Ongoing issues',ic:'bolt',badge:()=>this.scoped().filter(b=>b.stage==='issue').length||null});
     // --- Bills ---
     it.push({id:'bills',label:'All bills',ic:'bills',section:'Bills',badge:()=>this.scoped().length||null});
     it.push({id:'unpaid',label:'Unpaid bills',ic:'bills',section:'Bills',badge:()=>this.scoped().filter(b=>billUnpaid(b)).length||null});
@@ -722,7 +723,7 @@ const App={
 
   render(){if(!CURRENT)return;
     const titles={dashboard:['Dashboard',CURRENT.name+' · '+ROLES[CURRENT.role]],submissions:['Submissions','Trainee entries awaiting submit'],
-      approvals:['Approvals','Bills routed to you for sign-off'],inbox:['Inbox','New bills to code and route'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],reports:['Reports','AP aging, spend, and vendor totals'],
+      approvals:['Approvals','Bills routed to you for sign-off'],issues:['Ongoing issues','Bills held back until a problem is resolved'],inbox:['Inbox','New bills to code and route'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],reports:['Reports','AP aging, spend, and vendor totals'],
       payments:['Payments','All payments — make payment & track status'],checks:['Checks Processing','Print, cut, then deposit Chase checks'],tracking:['Tracking','Checks to mail — sent & delivery status'],pickups:['Pickups','Checks to be collected'],
       vendors:['Vendors','Master list · active & inactive'],accounts:['Accounts','Store & entity codes'],users:['Users','Logins & access'],activity:['Activity','Logins & every action — saved'],deleted:['Deleted','Recoverable — admin only']};
     $('#vTitle').textContent=(titles[this.state.view]||[''])[0];
@@ -810,7 +811,7 @@ const App={
         <div style="font-size:12.5px;color:var(--ink-3);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="entity-chip" style="font-size:11px"><span class="pin"></span>${b.account}</span><span>${invOf(b)}</span><span>received ${b.receivedDate?fmtD(b.receivedDate):'—'}</span><span>by ${b.enteredInitials||'—'}</span>${b.link?`<span style="color:var(--blue);display:inline-flex;align-items:center;gap:3px">${svg(ICN.bills,12)} document</span>`:''}</div>
       </div>
       <div class="mono" style="font-weight:700;font-size:15px;white-space:nowrap">${money(b.amount)}</div>
-      ${canRoute?`<button class="btn btn-gold btn-sm" onclick="event.stopPropagation();App.approveSubmission(${b.id})">${svg(ICN.check,13)} Code &amp; route</button>`:''}
+      ${canRoute?`<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0"><button class="btn btn-gold btn-sm" onclick="event.stopPropagation();App.approveSubmission(${b.id})">${svg(ICN.check,13)} Code &amp; route</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();App.flagIssue(${b.id})">${svg(ICN.bolt,12)} Flag issue</button></div>`:''}
     </div>`).join('')}</div>`:`<div class="card"><div class="empty" style="padding:42px 20px">${svg(ICN.inbox,34)}<div style="margin-top:10px;font-weight:600;color:var(--ink-1)">Inbox is empty</div><div style="font-size:13px;color:var(--ink-3);margin-top:5px;max-width:440px;margin-left:auto;margin-right:auto;line-height:1.5">New bills land here to be coded and routed. Once email intake is connected, anything emailed to your AP address will appear here too.</div>${can('create')?`<button class="btn btn-gold btn-sm" style="margin-top:16px" data-new>${svg(ICN.plus,14)} Add a bill</button>`:''}</div></div>`}`;
   },
   v_submissions(){
@@ -855,6 +856,29 @@ const App={
       <tbody>${rows.length?rows.map(b=>`<tr><td class="mono" style="font-weight:700">#${b.id}</td><td>${b.vendor}</td><td class="r mono" style="font-weight:600">${money(b.amount)}</td><td>${b.approval.status==='approved'?'<span class="badge b-green"><span class="dot"></span>Approved</span>':'<span class="badge b-red"><span class="dot"></span>Rejected</span>'}</td><td>${b.approval.byInitials||''}</td></tr>`).join(''):`<tr><td colspan="5"><div class="empty">${svg(ICN.clock,30)}<div>No decisions yet.</div></div></td></tr>`}</tbody></table></div></div>`;
     }
     return tabBar+body;
+  },
+
+  /* ---------- ONGOING ISSUES (bills held back) ---------- */
+  v_issues(){
+    const items=this.scoped().filter(b=>b.stage==='issue');
+    const rows=items.slice().sort((a,b)=>((b.issue&&b.issue.at)||0)-((a.issue&&a.issue.at)||0)||b.id-a.id);
+    const canRoute=CURRENT.role==='admin'||this.canApproveAny()||can('create');
+    return `
+    <div class="filters" style="flex-wrap:wrap;gap:8px">
+      <span style="color:var(--ink-3);font-size:13px"><b style="color:var(--ink-2)">${items.length}</b> bill${items.length!==1?'s':''} on hold</span>
+    </div>
+    ${rows.length?`<div style="display:flex;flex-direction:column;gap:8px">${rows.map(b=>`<div class="card click" data-bill="${b.id}" style="display:flex;align-items:flex-start;gap:14px;padding:14px 18px;cursor:pointer;border-left:3px solid var(--red)">
+      <div class="vlogo">${abbr(b.vendor)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;color:var(--ink-1)">${b.vendor} <span class="mono" style="font-weight:700;color:var(--ink-3);font-size:12px">#${b.id}</span></div>
+        <div style="font-size:12.5px;color:var(--ink-3);display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px"><span class="entity-chip" style="font-size:11px"><span class="pin"></span>${b.account}</span><span>${invOf(b)}</span><span class="mono">${money(b.amount)}</span></div>
+        ${b.issue?`<div style="margin-top:8px;background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.18);border-radius:8px;padding:8px 11px"><div style="font-size:13px;color:var(--ink-1);white-space:pre-wrap">${escT(b.issue.reason||'')}</div><div style="font-size:11px;color:var(--ink-3);margin-top:4px">flagged by ${b.issue.by||'—'} · ${b.issue.at?dOf(b.issue.at):'—'}</div></div>`:''}
+      </div>
+      ${canRoute?`<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button class="btn btn-gold btn-sm" onclick="event.stopPropagation();App.resolveIssue(${b.id})">${svg(ICN.check,13)} Resolve &amp; route</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();App.flagIssue(${b.id})">${svg(ICN.edit,12)} Edit note</button>
+      </div>`:''}
+    </div>`).join('')}</div>`:`<div class="card"><div class="empty" style="padding:42px 20px">${svg(ICN.bolt,34)}<div style="margin-top:10px;font-weight:600;color:var(--ink-1)">No bills on hold</div><div style="font-size:13px;color:var(--ink-3);margin-top:5px;max-width:440px;margin-left:auto;margin-right:auto;line-height:1.5">When a bill from the Inbox has a problem — wrong amount, missing approval, a dispute — flag it as an issue and it parks here until it's sorted out. Resolve it to send it on for approval or payment.</div></div></div>`}`;
   },
 
   /* ---------- ALL BILLS ---------- */
@@ -1555,6 +1579,24 @@ const App={
     this.logBill(b,'Approved submission',b.vendor+' · '+(b.stage==='pending'?'→ approval':'→ ready for payment'));
     this.persist();this.toast('Submission #'+b.id+' approved');this.render();
   },
+  /* ---------- ongoing issues: hold a bill back / send it on ---------- */
+  flagIssue(id){const b=BILLS.find(x=>x.id===id);if(!b)return;
+    const prev=(b.issue&&b.issue.reason)||'';
+    const reason=(prompt('What is the issue with this bill? It will be held in Ongoing issues until resolved.',prev)||'').trim();
+    if(!reason)return;
+    const reopen=b.stage!=='issue';
+    b._preIssue=b._preIssue||{stage:b.stage,approval:b.approval};
+    b.stage='issue';b.payType=null;
+    b.issue={reason,by:CURRENT.initials,at:Date.now(),status:'open'};
+    this.logBill(b,reopen?'Flagged issue':'Updated issue note',reason);
+    this.persist();this.toast('Bill #'+b.id+' moved to Ongoing issues');this.render();
+  },
+  resolveIssue(id){const b=BILLS.find(x=>x.id===id);if(!b||b.stage!=='issue')return;
+    b.issue=null;b._preIssue=null;
+    this.routeAfterEntry(b);
+    this.logBill(b,'Issue resolved',b.vendor+' · '+(b.stage==='pending'?'→ approval':'→ ready for payment'));
+    this.persist();this.toast('Bill #'+b.id+(b.stage==='pending'?' sent for approval':' is ready for payment'));this.render();
+  },
 
   /* ---------- approve / reject ---------- */
   openApprove(id){const b=BILLS.find(x=>x.id===id);if(!b||!this.canApproveBill(b))return;
@@ -1731,6 +1773,8 @@ const App={
     if(b.isChase)return this.openChaseBill(b);
     const acts=[];
     if(b.stage==='submission')acts.push(`<button class="btn btn-gold" onclick="App.closeDrawer();App.approveSubmission(${b.id})">${svg(ICN.check,14)} Approve submission</button>`);
+    if(b.stage==='issue')acts.push(`<button class="btn btn-gold" onclick="App.closeDrawer();App.resolveIssue(${b.id})">${svg(ICN.check,14)} Resolve &amp; route</button>`);
+    if((b.stage==='submission'||b.stage==='pending'||b.stage==='ready'||b.stage==='issue')&&(CURRENT.role==='admin'||this.canApproveAny()||can('create')))acts.push(`<button class="btn btn-ghost" onclick="App.flagIssue(${b.id})">${svg(ICN.bolt,14)} ${b.stage==='issue'?'Edit issue note':'Flag issue'}</button>`);
     if(b.stage==='pending'&&this.canApproveBill(b))acts.push(`<button class="btn btn-gold" onclick="App.closeDrawer();App.openApprove(${b.id})">Review</button>`);
     if(b.stage==='ready'&&!b.payType&&can('record'))acts.push(`<button class="btn btn-gold" onclick="App.closeDrawer();App.openRecord(${b.id})">${svg(ICN.dollar,14)} Pay Bill</button>`);
     if(b.payType==='check'){
