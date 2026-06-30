@@ -2089,20 +2089,43 @@ const App={
   openDrawerEl(html){this.hidePreview();$('#drawer').innerHTML=html;$('#drawer').classList.add('on');$('#scrim').classList.add('on');$('#drawer').querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>this.closeDrawer());},
   closeDrawer(){this.hidePreview();$('#drawer').classList.remove('on');$('#scrim').classList.remove('on')},
   hidePreview(){const p=document.getElementById('billpreview');if(p)p.remove();},
-  showPreview(b){this.hidePreview();if(!b||!b.link||window.innerWidth<900)return;
+  showPreview(b){this.hidePreview();if(!b||window.innerWidth<900)return;
     const drawer=document.getElementById('drawer');const dw=drawer?Math.round(drawer.getBoundingClientRect().width):540;
-    const safe=String(b.link).replace(/"/g,'&quot;');const emb=String(embedUrl(b.link)).replace(/"/g,'&quot;');
     const p=document.createElement('div');p.id='billpreview';
     p.style.cssText='position:fixed;top:0;bottom:0;left:0;right:'+dw+'px;z-index:60;background:#0f1626;display:flex;flex-direction:column';
-    p.innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#0b1220;color:#fff;flex-shrink:0">
+    const head=`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#0b1220;color:#fff;flex-shrink:0">
         <div style="width:30px;height:30px;border-radius:8px;background:rgba(255,255,255,.1);display:grid;place-items:center">${svg(ICN.bills,15)}</div>
-        <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.vendor} · ${b.inv}</div><div style="font-size:11px;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Bill preview</div></div>
-        <a href="${safe}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#d4af37;text-decoration:none;white-space:nowrap">Open ${svg(ICN.arrow,13)}</a>
-      </div>
-      <div style="flex:1;position:relative;background:#fff">
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--ink-3);font-size:13px;line-height:1.5">Loading preview…<br>If it stays blank, sign in to Microsoft 365 in this browser, or use <b style="margin:0 4px">Open ↗</b>.</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.vendor}${b.inv?' · '+b.inv:''}</div><div style="font-size:11px;color:rgba(255,255,255,.55)">Bill review</div></div>
+        ${b.link?`<a href="${String(b.link).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#d4af37;text-decoration:none;white-space:nowrap">Open ${svg(ICN.arrow,13)}</a>`:''}
+      </div>`;
+    let bodyHtml;
+    if(b.link){
+      const safe=String(b.link).replace(/"/g,'&quot;');
+      bodyHtml=`<div style="flex:1;position:relative;background:#fff">
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#888;font-size:13px;line-height:1.5">Loading preview…<br>If it stays blank, sign in to Microsoft 365 in this browser, or use <b style="margin:0 4px">Open ↗</b>.</div>
         <iframe src="${safe}" referrerpolicy="no-referrer" style="position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent"></iframe>
       </div>`;
+    } else {
+      const kv=(l,v)=>`<div style="display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid #eee;font-size:13px"><span style="color:#888">${l}</span><span style="font-weight:600;color:#111;text-align:right">${v||'—'}</span></div>`;
+      bodyHtml=`<div style="flex:1;overflow:auto;padding:32px;background:#0f1626;display:flex;justify-content:center">
+        <div style="width:100%;max-width:560px;background:#fff;border-radius:10px;box-shadow:0 12px 44px rgba(0,0,0,.35);padding:36px 40px;align-self:flex-start">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;gap:16px">
+            <div><div style="font-size:22px;font-weight:800;color:#111;line-height:1.15">${b.vendor}</div><div style="font-size:12px;color:#999;margin-top:3px">Bill #${b.id}${b.account?' · '+b.account:''}</div></div>
+            <div style="text-align:right;flex-shrink:0"><div style="font-size:10px;letter-spacing:1px;color:#bbb;font-weight:700">AMOUNT</div><div style="font-size:26px;font-weight:800;color:#111">${money(b.amount)}</div></div>
+          </div>
+          ${kv('Invoice #',b.inv)}
+          ${kv('Invoice date',b.invoiceDate?fmtD(b.invoiceDate):'')}
+          ${kv('Received',b.receivedDate?fmtD(b.receivedDate):'')}
+          ${kv('Due date',b.due?fmtD(b.due):'')}
+          ${kv('GL account',b.gl)}
+          ${kv('Method',b.method)}
+          ${kv('Check #',b.checkNumber)}
+          ${b.comments?`<div style="margin-top:18px"><div style="font-size:11px;color:#999;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Memo</div><div style="font-size:13px;color:#333;white-space:pre-wrap;background:#f7f7f8;border-radius:8px;padding:10px 12px">${String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`:''}
+          <div style="margin-top:26px;padding-top:16px;border-top:1px dashed #ddd;font-size:11.5px;color:#aaa;text-align:center">No scanned document attached. Add a “Link to bill” on this bill to preview the original invoice here.</div>
+        </div>
+      </div>`;
+    }
+    p.innerHTML=head+bodyHtml;
     document.body.appendChild(p);
   },
   persist(){ if(!TOKEN)return; API.saveOps().catch(e=>{ if(e.offline){API.online=false;this.toast('Offline — changes not saved');} else {this.toast('Save failed — '+(e.message||''));} }); },
