@@ -881,7 +881,7 @@ const App={
         <td class="mono">${invOf(b)}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</td>
         <td class="r mono" style="font-weight:600">${money(b.amount)}</td>
-        <td style="font-size:12.5px">${b.method||'<span style="color:var(--ink-3)">— set by AP</span>'}${(b.paidViaChase||b.chaseFlag)?' <span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':''}</td>
+        <td style="font-size:12.5px">${b.method||(()=>{const vd=vendor(b.vendor);return vd&&vd.m?`<span style="color:var(--ink-3)">${vd.m==='To be Picked Up'?'Pickup':vd.m} <span style="font-size:10px">· default</span></span>`:'<span style="color:var(--ink-3)">— set by AP</span>';})()}${(b.paidViaChase||b.chaseFlag)?' <span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':''}</td>
         <td>${statusBadge(b)}</td>
         <td class="mono" style="font-size:12px">${b.checkNumber||(b.isChase&&b.tracking)||'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.printed?fmtD(b.printed.date):'—'}</td>
