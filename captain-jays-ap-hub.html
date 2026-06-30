@@ -1118,7 +1118,7 @@ const App={
     const lp=vendorLastPaid(v.n);
     const ap=v.approver?((USERS.find(u=>u.u===v.approver)||{}).name||v.approver):'—';
     const accts=v.accounts?Object.entries(v.accounts):[];
-    const gl=(typeof VGL!=='undefined'&&VGL[v.n])||'—';
+    const gl=(v.gl)||(typeof VGL!=='undefined'&&VGL[v.n])||'—';
     const valFns={date:b=>(b.paid&&b.paid.date)||b.receivedDate||'',account:b=>b.account||'',amount:b=>+b.amount||0,status:b=>b.stage||'',inv:b=>(b.inv||'').toLowerCase()};
     const rows=this.gsortRows('vh',bills,valFns,'date');
     const stat=(label,val,sub)=>`<div class="card" style="padding:15px 18px"><div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="font-size:21px;font-weight:800;color:#000;margin-top:4px">${val}</div>${sub?`<div style="font-size:11.5px;color:var(--ink-3);margin-top:2px">${sub}</div>`:''}</div>`;
@@ -1952,7 +1952,7 @@ const App={
     if(sb)sb.innerHTML=due?`${svg(ICN.clock,12)} Send by <b style="color:var(--ink-2)">${fmtD(sendByISO(due))}</b> — ${LEAD} days before due`:'';
     const vn=g('f_vendor')?(g('f_vendor').value||'').trim():'';const acct=g('f_acct')?g('f_acct').value:'';const amt=parseFloat(g('f_amt')?g('f_amt').value:'')||0;
     {const v=vendor(vn);
-     const gl=g('f_gl');if(v&&gl&&!gl.value.trim()&&typeof VGL!=='undefined'&&VGL[v.n])gl.value=VGL[v.n];
+     const gl=g('f_gl');const dgl=v&&((v.gl)||(typeof VGL!=='undefined'&&VGL[v.n]));if(v&&gl&&!gl.value.trim()&&dgl)gl.value=dgl;
      if(v&&v.approver&&this._apprAutoFor!==v.n){const aq=g('f_approq');if(aq){aq.value='yes';this.createApprToggle();const ap=g('f_approver');if(ap)ap.value=v.approver;}this._apprAutoFor=v.n;}}
     const note=g('f_monthnote');if(!note)return;
     if(!vn||!acct||!vendor(vn)){note.innerHTML='';return;}
@@ -2013,6 +2013,7 @@ const App={
         <div class="field"><label>Vendor email</label><div class="inp" style="padding:0"><input id="nv_email" type="email" value="${ex?esc(ex.email):''}" style="${inp}"></div></div>
         <div class="field"><label>Vendor phone number</label><div class="inp" style="padding:0"><input id="nv_phone" value="${ex?esc(ex.phone):''}" style="${inp}"></div></div>
         <div class="field"><label>Default payment method</label><select id="nv_method" class="selent" style="width:100%"><option value="">— none —</option>${METHODS.map(m=>`<option ${ex&&ex.m===m?'selected':''}>${m}</option>`).join('')}</select></div>
+        <div class="field"><label>Default GL account <span style="color:var(--ink-3)">· auto-fills on new bills</span></label><div class="inp" style="padding:0"><input id="nv_gl" list="vgllist" value="${esc(ex?(ex.gl||(typeof VGL!=='undefined'&&VGL[ex.n])||''):'')}" placeholder="e.g. Utilities, Rent, Supplies…" style="${inp}"></div><datalist id="vgllist"><option value="Utilities"><option value="Rent"><option value="Supplies"><option value="Insurance"><option value="Repairs & Maintenance"><option value="Food · COGS"><option value="Licenses & Fees"><option value="Security"></datalist></div>
         <div class="field"><label>Payment portal URL</label><div class="inp" style="padding:0"><input id="nv_payurl" value="${ex?esc(ex.payUrl):''}" placeholder="https://…" style="${inp}"></div></div>
         ${ex&&ex.prevYr?`<div class="field"><label>Prior-year payments (total)</label><div style="font-weight:700;font-size:15px">${money(ex.prevYr)}</div></div>`:''}
         ${ex&&ex.accounts&&Object.keys(ex.accounts).length?`<div class="field"><label>Account numbers by store <span style="color:var(--ink-3)">· ${Object.keys(ex.accounts).length} on file</span></label><div style="max-height:160px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">${Object.entries(ex.accounts).map(([s,no])=>`<tr style="border-bottom:1px solid var(--line)"><td style="padding:6px 10px 6px 0;font-weight:600;color:var(--ink-3);white-space:nowrap;vertical-align:top">${s}</td><td class="mono" style="padding:6px 0;color:var(--ink-2);word-break:break-all">${String(no).replace(/</g,'&lt;')}</td></tr>`).join('')}</table></div></div>`:''}
@@ -2044,7 +2045,8 @@ const App={
     const composed=[addr1,[city,[st,zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join(', ');
     const fields={m,approver:appr,a:composed,addr1,city,state:st,zip,intl,
       acctNo:($('#nv_acct').value||'').trim(),email:($('#nv_email').value||'').trim(),
-      phone:($('#nv_phone').value||'').trim(),payUrl:($('#nv_payurl').value||'').trim()||null};
+      phone:($('#nv_phone').value||'').trim(),payUrl:($('#nv_payurl').value||'').trim()||null,
+      gl:($('#nv_gl')?$('#nv_gl').value:'').trim()};
     if(orig){const v=vendor(orig);if(v)Object.assign(v,fields);this.log('Updated vendor',name);}
     else{if(vendor(name)){this.toast('That vendor already exists');return;}VENDORS.push(Object.assign({n:name,active:true},fields));this.log('Added vendor',name);}
     this.persist();this.closeDrawer();this.toast('Vendor saved · '+name);this.render();
