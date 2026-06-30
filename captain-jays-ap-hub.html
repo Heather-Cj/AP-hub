@@ -1383,6 +1383,9 @@ const App={
     const v=vendor(vname);
     if(!v){this.toast('“'+vname+'” isn’t an active vendor — pick from the list (admin adds new ones)');return;}
     if(!v.active){this.toast('“'+vname+'” is inactive — reactivate it first');return;}
+    const invn=inv.toLowerCase();
+    const dup=BILLS.find(x=>!x.isChase&&!x._deletedAt&&x.vendor===v.n&&((invn&&String(x.inv||'').toLowerCase()===invn)||(String(x.account)===String(account)&&Math.abs((+x.amount||0)-amount)<0.005&&monthKey(x.receivedDate)===monthKey(todayISO))));
+    if(dup&&!confirm('Possible duplicate — bill #'+dup.id+' for '+v.n+' ('+dup.account+' · '+(dup.inv||'no invoice #')+' · '+money(dup.amount)+') already exists.\n\nEnter this bill anyway?'))return;
     const comments=(g('f_memo')?g('f_memo').value:'').trim();
     const b={id:nextId++,vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,link,comments,receivedDate:todayISO,
       method:null,tracking:'',payType:null,enteredBy:CURRENT.u,enteredInitials:CURRENT.initials,
