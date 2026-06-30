@@ -864,9 +864,8 @@ const App={
     let rows=this.scoped().filter(b=>this.matchBill(b)).filter(b=>st==='all'||this.statusKey(b)===st).filter(b=>this._unpaidOnly?billUnpaid(b):true);
     rows=this.applySort(rows);
     const total=rows.length;
-    const lim=this.state.billLimit||150;
-    const shown=rows.slice(0,lim);
-    const more=total-shown.length;
+    const shown=rows;
+    const more=0;
     return `
     <div class="filters">
       ${this.filterControls(true)}
