@@ -415,7 +415,7 @@ const billUnpaid=b=>{
   return true;
 };
 // outstanding balance = sum of this vendor's open bills
-function vendorBalance(name){const n=String(name||'').toLowerCase();return BILLS.filter(b=>String(b.vendor||'').toLowerCase()===n&&billOpen(b)).reduce((s,b)=>s+(+b.amount||0),0);}
+function vendorBalance(name){const n=String(name||'').toLowerCase();return BILLS.filter(b=>String(b.vendor||'').toLowerCase()===n&&billUnpaid(b)).reduce((s,b)=>s+(+b.amount||0),0);}
 // most recent settled payment for this vendor
 function vendorLastPaid(name){const n=String(name||'').toLowerCase();let best=null;BILLS.forEach(b=>{if(String(b.vendor||'').toLowerCase()!==n)return;const p=billPaidInfo(b);if(!p)return;if(!best||p.date>best.date)best=p;});return best;}
 
@@ -1145,7 +1145,7 @@ const App={
     const esc=String(v.n).replace(/'/g,"\\'");
     const bills=BILLS.filter(b=>!b.isChase&&String(b.vendor||'').toLowerCase()===String(v.n).toLowerCase());
     const paid=bills.filter(b=>b.stage==='paid');
-    const openB=bills.filter(b=>billOpen(b));
+    const openB=bills.filter(b=>billUnpaid(b));
     const totalPaid=paid.reduce((s,b)=>s+(+b.amount||0),0);
     const bal=openB.reduce((s,b)=>s+(+b.amount||0),0);
     const lp=vendorLastPaid(v.n);
