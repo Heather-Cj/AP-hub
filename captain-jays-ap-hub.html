@@ -1579,7 +1579,7 @@ const App={
   refPlaceholder(m){return this.isCheckLike(m)?'Check number':'Confirmation / reference #';},
   openRecord(id){const b=BILLS.find(x=>x.id===id);if(!b||!can('record'))return;
     const inp='border:none;background:none;width:100%;font:inherit;font-weight:600;padding:9px 11px';
-    const dm=b.method||this.defaultMethod(b);const faisal=FAISAL.includes(b.account);const chk=isCheckMethod(dm);const showChk=chk||dm==='To be Picked Up';
+    const dm=b.method||(b.chaseFlag?'Credit Card':this.defaultMethod(b));const faisal=FAISAL.includes(b.account);const chk=isCheckMethod(dm);const showChk=chk||dm==='To be Picked Up';
     this.openDrawerEl(`
       <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px">${svg(ICN.dollar,18)}</div><div><div style="font-weight:700;font-size:15px">Pay Bill</div><div style="font-size:12.5px;color:var(--ink-3)">Pick how it's paid</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
       <div class="dr-body">
