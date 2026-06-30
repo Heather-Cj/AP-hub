@@ -404,6 +404,16 @@ const invOf=b=>{const s=b&&b.inv;return (s&&String(s).trim()&&String(s)!=='undef
 // a bill counts as "settled" once money's out the door (recorded payment, or a check that was delivered)
 const billPaidInfo=b=>{if(!b)return null;if(b.paid&&b.paid.date)return{date:b.paid.date,amount:+b.amount||0,initials:b.paid.initials||''};if(b.delivered&&b.delivered.date)return{date:b.delivered.date,amount:+b.amount||0,initials:(b.delivered.initials)||''};return null;};
 const billOpen=b=>!b.isChase&&b.stage!=='rejected'&&!billPaidInfo(b);
+// "Unpaid" = still genuinely awaiting payment. A cut check (has a check number)
+// or an already-recorded payment is NOT unpaid — those live in Checks/Tracking.
+const billUnpaid=b=>{
+  if(!b||b.isChase||b.stage==='rejected'||b.stage==='paid')return false;
+  if(billPaidInfo(b))return false;
+  if(b.checkNumber)return false;
+  if(b.payType==='online')return false;
+  if((b.payType==='check'||b.payType==='pickup')&&b.checkStage&&b.checkStage!=='print')return false;
+  return true;
+};
 // outstanding balance = sum of this vendor's open bills
 function vendorBalance(name){const n=String(name||'').toLowerCase();return BILLS.filter(b=>String(b.vendor||'').toLowerCase()===n&&billOpen(b)).reduce((s,b)=>s+(+b.amount||0),0);}
 // most recent settled payment for this vendor
@@ -636,7 +646,7 @@ const App={
     it.push({id:'submissions',label:'Submissions',ic:'inbox',badge:()=>BILLS.filter(b=>b.stage==='submission').length||null});
     if(this.canApproveAny()) it.push({id:'approvals',label:'Approvals',ic:'check',badge:()=>BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b)).length||null});
     it.push({id:'bills',label:'All bills',ic:'bills',section:'Bills',badge:()=>this.scoped().length||null});
-    it.push({id:'unpaid',label:'Unpaid bills',ic:'bills',section:'Bills',badge:()=>this.scoped().filter(b=>billOpen(b)).length||null});
+    it.push({id:'unpaid',label:'Unpaid bills',ic:'bills',section:'Bills',badge:()=>this.scoped().filter(b=>billUnpaid(b)).length||null});
     if(can('record')) it.push({id:'payments',label:'Payments',ic:'card',badge:()=>BILLS.filter(b=>b.stage==='ready'&&!b.payType&&!b.isChase).length||null});
     if(can('record')) it.push({id:'checks',label:'Checks Processing',ic:'check',badge:()=>BILLS.filter(b=>(b.isChase&&(b.chaseStage==='print'||b.chaseStage==='cut'||b.chaseStage==='deposit'))||(b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'))||(b.payType==='pickup'&&b.checkStage==='cut')).length||null});
     if(can('record')||can('create')) it.push({id:'tracking',label:'Tracking',ic:'truck',badge:()=>BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='send'||b.checkStage==='transit')).length||null});
@@ -812,7 +822,7 @@ const App={
   v_unpaid(){this._unpaidOnly=true;const html=this.v_bills();this._unpaidOnly=false;return html;},
   v_bills(){
     const st=this.state.billStage;
-    let rows=this.scoped().filter(b=>this.matchBill(b)).filter(b=>st==='all'||this.statusKey(b)===st).filter(b=>this._unpaidOnly?billOpen(b):true);
+    let rows=this.scoped().filter(b=>this.matchBill(b)).filter(b=>st==='all'||this.statusKey(b)===st).filter(b=>this._unpaidOnly?billUnpaid(b):true);
     rows=this.applySort(rows);
     const total=rows.length;
     const lim=this.state.billLimit||150;
