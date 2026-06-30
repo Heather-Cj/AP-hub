@@ -1049,7 +1049,7 @@ const App={
     let body='';
     if(tab==='send'){
       const rows=tsort(toSend);
-      body=`${readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready to send</span></div>
+      body=`${readiness.length?`<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="btn ${this.state.showReadiness?'btn-gold':'btn-ghost'} btn-sm" onclick="App.toggleReadiness()">${svg(ICN.bolt,13)} Vendor readiness ${this.state.showReadiness?'▴ hide':'▾ show'}</button></div>`:''}${this.state.showReadiness&&readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready to send</span></div>
         <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>{const total=v.ready+v.proc;const done=v.ready===total;return `<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span><span class="badge ${done?'b-green':'b-amber'}" style="font-size:9px;padding:1px 7px">${v.ready}/${total} ready to send</span></div>`;}).join('')}</div></div>`:''}
       <div class="card"><div class="card-h"><h3>To be sent out</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
         <div class="tablewrap"><table><thead><tr>${th('account','Account')}${th('vendor','Vendor')}${th('amount','Amount','r')}${th('check','Check #')}${th('invdate','Inv. date')}${th('printed','Printed')}${th('batch','Batch')}${th('sent','Date sent')}<th class="r"></th></tr></thead>
@@ -1263,6 +1263,7 @@ const App={
 
   /* ---------- ACCOUNTS ---------- */
   setReportTab(t){this.state.reportTab=t;this.render();},
+  toggleReadiness(){this.state.showReadiness=!this.state.showReadiness;this.render();},
   reportData(){
     const open=BILLS.filter(b=>!b.isChase&&billUnpaid(b));
     const paid=BILLS.filter(b=>!b.isChase&&b.stage==='paid');
