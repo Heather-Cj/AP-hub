@@ -67,6 +67,11 @@ button{font-family:inherit; cursor:pointer; border:none; background:none}
 .nav-item svg{width:17px;height:17px;flex:none;opacity:.92}
 .nav-badge{margin-left:auto;background:rgba(212,175,55,.18);color:var(--gold);font-size:11px;font-weight:600;
   padding:1px 7px;border-radius:20px;min-width:20px;text-align:center}
+.nav-sec{display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;cursor:pointer;
+  font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#5F7390;padding:15px 12px 6px;font-weight:600;font-family:inherit}
+.nav-sec:hover{color:#8aa0bf}
+.nav-chev{font-size:10px;transition:transform .15s ease;opacity:.65;line-height:1}
+.nav-secitems{display:flex;flex-direction:column;gap:1px}
 .nav-foot{padding:14px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:10px;align-items:center}
 .avatar{width:34px;height:34px;border-radius:50%;background:var(--gold);color:var(--navy-900);
   display:grid;place-items:center;font-weight:700;font-size:13px;flex:none}
@@ -643,23 +648,37 @@ const App={
   /* ---------- nav ---------- */
   navItems(){
     const it=[{id:'dashboard',label:'Dashboard',ic:'grid'}];
+    it.push({id:'inbox',label:'Inbox',ic:'inbox',badge:()=>this.scoped().filter(b=>b.stage==='submission').length||null});
     if(this.canApproveAny()) it.push({id:'approvals',label:'Approvals',ic:'check',badge:()=>BILLS.filter(b=>b.stage==='pending'&&this.canApproveBill(b)).length||null});
-    it.push({id:'inbox',label:'Inbox',ic:'inbox',section:'Bills',badge:()=>this.scoped().filter(b=>b.stage==='submission').length||null});
+    // --- Bills ---
     it.push({id:'bills',label:'All bills',ic:'bills',section:'Bills',badge:()=>this.scoped().length||null});
     it.push({id:'unpaid',label:'Unpaid bills',ic:'bills',section:'Bills',badge:()=>this.scoped().filter(b=>billUnpaid(b)).length||null});
-    if(can('record')) it.push({id:'payments',label:'Payments',ic:'card',badge:()=>BILLS.filter(b=>b.stage==='ready'&&!b.payType&&!b.isChase).length||null});
-    if(can('record')) it.push({id:'checks',label:'Checks Processing',ic:'check',badge:()=>BILLS.filter(b=>(b.isChase&&(b.chaseStage==='print'||b.chaseStage==='cut'||b.chaseStage==='deposit'))||(b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'))||(b.payType==='pickup'&&b.checkStage==='cut')).length||null});
-    if(can('record')||can('create')) it.push({id:'tracking',label:'Tracking',ic:'truck',badge:()=>BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='send'||b.checkStage==='transit')).length||null});
-    if(can('pickup')) it.push({id:'pickups',label:'Pickups',ic:'truck',badge:()=>BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup').length||null});
-    it.push({id:'vendors',label:'Vendors',ic:'vendor'});
-    it.push({id:'eom',label:'EOM Tracker',ic:'cal'});
-    if(CURRENT.role==='admin'){it.push({id:'accounts',label:'Accounts',ic:'entity'});it.push({id:'users',label:'Users',ic:'users'});it.push({id:'activity',label:'Activity',ic:'audit'});it.push({id:'deleted',label:'Deleted',ic:'trash',badge:()=>(DELETED.bills.length+DELETED.vendors.length)||null});it.push({id:'settings',label:'Admin Settings',ic:'bolt'});}
+    // --- Pay & send ---
+    if(can('record')) it.push({id:'payments',label:'Payments',ic:'card',section:'Pay & send',badge:()=>BILLS.filter(b=>b.stage==='ready'&&!b.payType&&!b.isChase).length||null});
+    if(can('record')) it.push({id:'checks',label:'Checks',ic:'check',section:'Pay & send',badge:()=>BILLS.filter(b=>(b.isChase&&(b.chaseStage==='print'||b.chaseStage==='cut'||b.chaseStage==='deposit'))||(b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'))||(b.payType==='pickup'&&b.checkStage==='cut')).length||null});
+    if(can('record')||can('create')) it.push({id:'tracking',label:'Tracking',ic:'truck',section:'Pay & send',badge:()=>BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='send'||b.checkStage==='transit')).length||null});
+    if(can('pickup')) it.push({id:'pickups',label:'Pickups',ic:'truck',section:'Pay & send',badge:()=>BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup').length||null});
+    // --- Manage ---
+    it.push({id:'vendors',label:'Vendors',ic:'vendor',section:'Manage'});
+    it.push({id:'eom',label:'EOM Tracker',ic:'cal',section:'Manage'});
+    if(CURRENT.role==='admin') it.push({id:'accounts',label:'Accounts',ic:'entity',section:'Manage'});
+    // --- Admin ---
+    if(CURRENT.role==='admin'){it.push({id:'users',label:'Users',ic:'users',section:'Admin'});it.push({id:'activity',label:'Activity',ic:'audit',section:'Admin'});it.push({id:'deleted',label:'Deleted',ic:'trash',section:'Admin',badge:()=>(DELETED.bills.length+DELETED.vendors.length)||null});it.push({id:'settings',label:'Admin Settings',ic:'bolt',section:'Admin'});}
     return it;
   },
   renderNav(){if(!CURRENT)return;
-    let lastSec=null;
-    $('#navItems').innerHTML=`<div class="nav-group"><div class="nav-label">${ROLES[CURRENT.role]}</div>${this.navItems().map(it=>{const bv=it.badge?it.badge():null;let pre='';if(it.section&&it.section!==lastSec){pre=`<div class="nav-label" style="margin-top:12px">${it.section}</div>`;lastSec=it.section;}else if(!it.section){lastSec=null;}return pre+`<button class="nav-item" data-go="${it.id}">${svg(ICN[it.ic],17)}<span>${it.label}</span>${bv?`<span class="nav-badge">${bv}</span>`:''}</button>`}).join('')}</div>`;
+    const items=this.navItems();const closed=this.state.navClosed||(this.state.navClosed={});
+    const itm=it=>{const bv=it.badge?it.badge():null;return `<button class="nav-item" data-go="${it.id}">${svg(ICN[it.ic],17)}<span>${it.label}</span>${bv?`<span class="nav-badge">${bv}</span>`:''}</button>`;};
+    const top=items.filter(i=>!i.section);
+    const secs=[...new Set(items.filter(i=>i.section).map(i=>i.section))];
+    let html=`<div class="nav-group"><div class="nav-label">${ROLES[CURRENT.role]}</div>${top.map(itm).join('')}`;
+    for(const s of secs){const off=!!closed[s];
+      html+=`<button class="nav-sec" data-navsec="${s.replace(/"/g,'&quot;')}"><span>${s}</span><span class="nav-chev" style="transform:rotate(${off?-90:0}deg)">▾</span></button>`;
+      html+=`<div class="nav-secitems"${off?' style="display:none"':''}>${items.filter(i=>i.section===s).map(itm).join('')}</div>`;}
+    html+='</div>';
+    $('#navItems').innerHTML=html;
     $('#navItems').querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{this.go(b.dataset.go);document.getElementById('nav').classList.remove('open')});
+    $('#navItems').querySelectorAll('[data-navsec]').forEach(b=>b.onclick=()=>{const k=b.dataset.navsec;this.state.navClosed[k]=!this.state.navClosed[k];this.renderNav();this.setActive();});
   },
   setActive(){$('#navItems').querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.go===this.state.view))},
   go(v){const ok=this.navItems().some(i=>i.id===v);this.state.view=ok?v:'dashboard';this.state.billLimit=150;this.state.payLimit=150;this.state.vendorView=null;this.render()},
