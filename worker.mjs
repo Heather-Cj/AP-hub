@@ -94,6 +94,36 @@ function makeStore(kv) {
   };
 }
 
+// ---------- one-time data purge (bills only; vendors + users kept) ----------
+// Bump this tag to trigger a fresh purge. Runs once, guarded by the 'purge_tag' key.
+const PURGE_TAG = 'bills-wipe-2026-07-01';
+async function maybePurge(store) {
+  const done = await store.getJSON('purge_tag');
+  if (done === PURGE_TAG) return;
+  const meta = (await store.getJSON('meta')) || {};
+  const shards = Array.isArray(meta.shards) ? meta.shards : [];
+  // back up every bill shard + the old meta before deleting, so it's restorable
+  await store.setJSON('bak:' + PURGE_TAG + ':meta', meta);
+  for (const mk of shards) {
+    const chunk = await store.getJSON('bills:' + mk);
+    if (chunk) await store.setJSON('bak:' + PURGE_TAG + ':bills:' + mk, chunk);
+    try { await store.del('bills:' + mk); } catch {}
+  }
+  const del = (meta.deleted && typeof meta.deleted === 'object') ? meta.deleted : {};
+  const gen = Date.now();
+  await store.setJSON('meta', {
+    vendors: Array.isArray(meta.vendors) ? meta.vendors : [],   // keep vendors
+    audit: [],
+    deleted: { bills: [], vendors: Array.isArray(del.vendors) ? del.vendors : [] },
+    nextId: meta.nextId || 10001,
+    shards: [],
+    gen,          // stamps a new generation; pre-purge sessions can no longer save
+    purgedAt: gen,
+  });
+  try { await store.del('ops'); } catch {}   // drop the legacy single-blob store
+  await store.setJSON('purge_tag', PURGE_TAG);
+}
+
 async function getUsers(store) {
   const v = await store.getJSON('users');
   if (Array.isArray(v) && v.length) return v;
@@ -165,6 +195,7 @@ async function handleApi(req, env) {
   const url = new URL(req.url);
   const action = url.searchParams.get('action');
   const store = makeStore(env.AP_HUB);
+  await maybePurge(store);
   let body = {};
   if (req.method === 'POST') { try { body = await req.json(); } catch {} }
 
@@ -188,10 +219,10 @@ async function handleApi(req, env) {
         if (Array.isArray(chunk)) bills = bills.concat(chunk);
       }
       const ops = { vendors: meta.vendors || [], bills, audit: meta.audit || [], deleted: meta.deleted || { bills: [], vendors: [] }, nextId: meta.nextId || 10001 };
-      return json({ ops, users: users.map(sanitize) });
+      return json({ ops, users: users.map(sanitize), gen: meta.gen || 0 });
     }
     const ops = await store.getJSON('ops');
-    return json({ ops: ops || null, users: users.map(sanitize) });
+    return json({ ops: ops || null, users: users.map(sanitize), gen: 0 });
   }
 
   if (action === 'saveOps') {
@@ -202,6 +233,11 @@ async function handleApi(req, env) {
     for (const b of bills) { const mk = monthKeyOf(b); (groups[mk] = groups[mk] || []).push(b); }
     const shards = Object.keys(groups).sort();
     const prevMeta = await store.getJSON('meta');
+    const curGen = (prevMeta && prevMeta.gen) || 0;
+    // concurrency guard: once a generation is stamped, a client must send the
+    // matching gen to save. Pre-purge tabs (no/old gen) are rejected so they
+    // cannot re-add wiped bills. Clients reload on 409 to pick up the new gen.
+    if (curGen && body.gen !== curGen) return json({ error: 'Data was reset — please reload.', code: 'STALE', gen: curGen }, 409);
     const prevShards = (prevMeta && Array.isArray(prevMeta.shards)) ? prevMeta.shards : [];
     for (const mk of shards) await store.setJSON('bills:' + mk, groups[mk]);
     for (const mk of prevShards) if (!groups[mk]) { try { await store.del('bills:' + mk); } catch {} }
@@ -209,7 +245,7 @@ async function handleApi(req, env) {
       vendors: Array.isArray(o.vendors) ? o.vendors : [],
       audit: Array.isArray(o.audit) ? o.audit.slice(0, 800) : [],
       deleted: { bills: Array.isArray(del.bills) ? del.bills : [], vendors: Array.isArray(del.vendors) ? del.vendors : [] },
-      nextId: o.nextId || 10001, shards, savedAt: Date.now(),
+      nextId: o.nextId || 10001, shards, savedAt: Date.now(), gen: curGen,
     });
     return json({ ok: true, shards: shards.length, bills: bills.length });
   }

@@ -511,6 +511,7 @@ function varianceNote(b){const v=billVariance(b);if(!v)return '';
 // API endpoint: '/api' on Cloudflare Workers; falls back to the Netlify function path if present.
 const API_BASE=(typeof location!=='undefined'&&location.hostname.includes('netlify'))?'/.netlify/functions/api':'/api';
 let TOKEN=null;
+let GEN=0;
 const LS={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
 /* local snapshot of server-confirmed data → instant paint on open, refresh in background */
 function cacheOps(){try{LS.set('aphub_ops',JSON.stringify({vendors:VENDORS,bills:BILLS,audit:AUDIT.slice(0,400),deleted:DELETED,nextId,users:USERS}));}catch(e){}}
@@ -531,12 +532,14 @@ const API={
     try{r=await fetch(API_BASE+'?action='+encodeURIComponent(action),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});}
     catch(e){const err=new Error('Offline');err.offline=true;throw err;}
     let data={};try{data=await r.json();}catch(e){}
-    if(!r.ok){const err=new Error(data.error||('Request failed ('+r.status+')'));if(r.status===404)err.offline=true;else err.status=r.status;throw err;}
+    if(!r.ok){
+      if(r.status===409&&data.code==='STALE'){ if(typeof data.gen!=='undefined')GEN=data.gen; try{LS.del('aphub_ops');}catch(e){} if(!window.__staleReload){window.__staleReload=true; alert('The bill data was reset on the server. Reloading to show the latest.'); location.reload();} const se=new Error('stale');se.stale=true;throw se; }
+      const err=new Error(data.error||('Request failed ('+r.status+')'));if(r.status===404)err.offline=true;else err.status=r.status;throw err;}
     return data;
   },
   async login(u,p){const d=await this.call('login',{u,p});TOKEN=d.token;LS.set('aphub_token',TOKEN);LS.set('aphub_user',JSON.stringify(d.user));this.online=true;return d.user;},
   async load(){return await this.call('load',{token:TOKEN});},
-  async saveOps(){try{await this.call('saveOps',{token:TOKEN,ops:{vendors:VENDORS,bills:BILLS,audit:AUDIT.slice(0,500),deleted:DELETED,nextId}});this.online=true;cacheOps();}catch(e){if(e.offline)this.online=false;throw e;}},
+  async saveOps(){try{await this.call('saveOps',{token:TOKEN,gen:GEN,ops:{vendors:VENDORS,bills:BILLS,audit:AUDIT.slice(0,500),deleted:DELETED,nextId}});this.online=true;cacheOps();}catch(e){if(e.offline)this.online=false;throw e;}},
   async upsertUser(user){return (await this.call('upsertUser',{token:TOKEN,user})).users;},
   async deleteUser(u){return (await this.call('deleteUser',{token:TOKEN,u})).users;},
   async syncInvoice(record){return await this.call('syncInvoice',{token:TOKEN,record});},
@@ -598,6 +601,7 @@ const App={
     const refresh=async()=>{
       try{
         const d=await API.load();
+        if(typeof d.gen!=='undefined')GEN=d.gen;
         CURRENT=su?JSON.parse(su):CURRENT;
         if(d.ops){ applyOps(d.ops); } else { API.saveOps().catch(()=>{}); }
         if(Array.isArray(d.users))USERS=d.users;
