@@ -189,6 +189,142 @@ async function excelUpsert(MS, record) {
   return { added: true };
 }
 
+// ---------- USPS tracking (OAuth2 client-credentials + Tracking API v3) ----------
+const USPS_OAUTH_URL = 'https://apis.usps.com/oauth2/v3/token';
+const USPS_TRACK_URL = 'https://apis.usps.com/tracking/v3/tracking/';
+const uspsReady = (env) => !!(env.USPS_CLIENT_ID && env.USPS_CLIENT_SECRET);
+
+// Fetch + cache an OAuth token in KV (USPS tokens last ~8h; we refresh a bit early).
+async function uspsToken(env, store) {
+  const cached = await store.getJSON('usps_token');
+  if (cached && cached.access_token && cached.exp > Date.now() + 60_000) return cached.access_token;
+  const r = await fetch(USPS_OAUTH_URL, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: env.USPS_CLIENT_ID, client_secret: env.USPS_CLIENT_SECRET }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.access_token) throw new Error('USPS auth failed (' + r.status + '): ' + JSON.stringify(d).slice(0, 200));
+  await store.setJSON('usps_token', { access_token: d.access_token, exp: Date.now() + (Number(d.expires_in || 28800) * 1000) });
+  return d.access_token;
+}
+
+// Raw tracking fetch for one number (also used by the diagnostic endpoint).
+async function uspsTrackRaw(env, store, tn) {
+  const token = await uspsToken(env, store);
+  const r = await fetch(USPS_TRACK_URL + encodeURIComponent(tn) + '?expand=DETAIL', {
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+  });
+  const body = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, body };
+}
+
+// Best-effort normalizer. USPS field names vary slightly by account/version, so we
+// read defensively from several possible keys. Validate/tighten once we see a live
+// response (the diagnostic endpoint returns the raw body for exactly this purpose).
+function normalizeUsps(raw) {
+  const b = raw || {};
+  const events = b.trackingEvents || b.trackEvents || b.eventSummaries || (b.trackInfo && b.trackInfo.events) || [];
+  const evTime = (e) => e && (e.eventTimestamp || e.eventDate || e.timestamp || e.date || '');
+  const list = Array.isArray(events) ? events.slice().sort((x, y) => String(evTime(y)).localeCompare(String(evTime(x)))) : [];
+  const latest = list[0] || {};
+  const category = String(b.statusCategory || b.status || (latest.eventType) || '').trim();
+  const summary = String(b.statusSummary || b.summary || latest.eventType || category || '').trim();
+  const loc = [latest.eventCity || latest.city, latest.eventState || latest.state].filter(Boolean).join(', ') ||
+              String(latest.eventLocation || latest.location || '').trim();
+  const lastEventAt = evTime(latest) ? Date.parse(evTime(latest)) || null : null;
+  const hay = (category + ' ' + summary + ' ' + (latest.eventType || '')).toLowerCase();
+  const delivered = /deliver/.test(hay) && !/out for deliver|available|schedul/.test(hay);
+  const exception = /(alert|return to sender|undeliverable|refused|no access|delivery attempt|held|exception|damage|missent|reschedul)/.test(hay);
+  return {
+    category, summary, location: loc, lastEventAt,
+    delivered, exception,
+    expectedDelivery: b.expectedDeliveryDate || b.predictedDeliveryDate || null,
+    eventsCount: list.length,
+  };
+}
+
+// Classify a bill's tracking state vs. thresholds; decide if a NEW alert is warranted.
+function assessTracking(norm, prev, now) {
+  const STUCK_MS = 24 * 60 * 60 * 1000;
+  const stuck = !norm.delivered && norm.lastEventAt && (now - norm.lastEventAt) > STUCK_MS;
+  const state = norm.delivered ? 'delivered' : norm.exception ? 'exception' : stuck ? 'stuck' : 'transit';
+  const prevState = (prev && prev.state) || 'transit';
+  // notify when we first reach delivered/exception/stuck (not on every poll)
+  const notify = state !== 'transit' && state !== prevState;
+  return { state, stuck, notify };
+}
+
+// Email via Resend (optional; skipped when RESEND_API_KEY / ALERT_EMAIL unset).
+async function sendAlertEmail(env, subject, html) {
+  if (!env.RESEND_API_KEY || !env.ALERT_EMAIL) return { skipped: true };
+  const to = String(env.ALERT_EMAIL).split(',').map((s) => s.trim()).filter(Boolean);
+  const from = env.ALERT_FROM || 'alerts@captainjays.net';
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + env.RESEND_API_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to, subject, html }),
+  });
+  return { ok: r.ok, status: r.status };
+}
+
+// The scheduled poller: bounded batch, oldest-checked first, updates bills in place.
+async function runTracking(env, store, limit = 40) {
+  if (!uspsReady(env)) return { skipped: 'usps-not-configured' };
+  const meta = await store.getJSON('meta');
+  const shards = (meta && Array.isArray(meta.shards)) ? meta.shards : [];
+  // gather in-transit checks that carry a tracking number
+  const cand = []; // {mk, idx, bill}
+  const shardData = {};
+  for (const mk of shards) {
+    const arr = await store.getJSON('bills:' + mk);
+    if (!Array.isArray(arr)) continue;
+    shardData[mk] = arr;
+    arr.forEach((bill, idx) => {
+      const tn = bill && bill.sent && bill.sent.tracking;
+      if (tn && bill.checkStage !== 'delivered' && !bill.isChase) cand.push({ mk, idx, tn: String(tn).replace(/\s/g, '') });
+    });
+  }
+  cand.sort((a, b) => {
+    const ca = (shardData[a.mk][a.idx].usps && shardData[a.mk][a.idx].usps.checkedAt) || 0;
+    const cb = (shardData[b.mk][b.idx].usps && shardData[b.mk][b.idx].usps.checkedAt) || 0;
+    return ca - cb; // least-recently checked first
+  });
+  const batch = cand.slice(0, limit);
+  const now = Date.now();
+  const touched = new Set();
+  const alerts = [];
+  for (const c of batch) {
+    const bill = shardData[c.mk][c.idx];
+    try {
+      const raw = await uspsTrackRaw(env, store, c.tn);
+      if (!raw.ok) { bill.usps = { ...(bill.usps || {}), checkedAt: now, error: 'HTTP ' + raw.status }; touched.add(c.mk); continue; }
+      const norm = normalizeUsps(raw.body);
+      const prev = bill.usps || {};
+      const { state, stuck, notify } = assessTracking(norm, prev, now);
+      bill.usps = { state, stuck, category: norm.category, summary: norm.summary, location: norm.location,
+        lastEventAt: norm.lastEventAt, expectedDelivery: norm.expectedDelivery, checkedAt: now, error: null };
+      if (norm.delivered && bill.checkStage !== 'delivered') {
+        bill.checkStage = 'delivered';
+        bill.delivered = bill.delivered || { date: new Date(norm.lastEventAt || now).toISOString().slice(0, 10), initials: 'USPS' };
+      }
+      if (notify) alerts.push({ bill, state });
+      touched.add(c.mk);
+    } catch (e) {
+      bill.usps = { ...(bill.usps || {}), checkedAt: now, error: String(e.message || e).slice(0, 120) };
+      touched.add(c.mk);
+    }
+  }
+  for (const mk of touched) await store.setJSON('bills:' + mk, shardData[mk]);
+  if (alerts.length) {
+    const rowsHtml = alerts.map((a) => {
+      const b = a.bill; const label = a.state === 'delivered' ? '✅ Delivered' : a.state === 'exception' ? '⚠️ Delivery exception' : '⏳ No movement &gt;1 day';
+      return `<tr><td>${label}</td><td>${b.vendor || ''}</td><td>${(b.sent && b.sent.tracking) || ''}</td><td>${(b.usps && b.usps.location) || ''}</td><td>${(b.usps && b.usps.summary) || ''}</td></tr>`;
+    }).join('');
+    await sendAlertEmail(env, `AP Hub · ${alerts.length} check tracking update${alerts.length !== 1 ? 's' : ''}`,
+      `<p>${alerts.length} check(s) changed status:</p><table border="1" cellpadding="6" cellspacing="0"><tr><th>Status</th><th>Vendor</th><th>Tracking</th><th>Location</th><th>Detail</th></tr>${rowsHtml}</table>`);
+  }
+  return { candidates: cand.length, polled: batch.length, updated: touched.size, alerts: alerts.length };
+}
+
 // ---------- the API handler ----------
 async function handleApi(req, env) {
   const SECRET = env.AP_HUB_SECRET || 'PLEASE-SET-AP_HUB_SECRET';
@@ -294,6 +430,24 @@ async function handleApi(req, env) {
     catch (e) { return json({ error: String(e.message || e), status: e.status || 500 }, 200); }
   }
 
+  // --- USPS tracking (admin) ---
+  if (action === 'uspsStatus') {
+    return json({ configured: uspsReady(env), emailConfigured: !!(env.RESEND_API_KEY && env.ALERT_EMAIL) });
+  }
+  if (action === 'uspsDiag') {   // validate the live response shape for one tracking number
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    if (!uspsReady(env)) return json({ error: 'USPS not configured — add USPS_CLIENT_ID / USPS_CLIENT_SECRET secrets' }, 400);
+    const tn = String(body.tn || '').replace(/\s/g, '');
+    if (!tn) return json({ error: 'Provide a tracking number as { tn }' }, 400);
+    try { const raw = await uspsTrackRaw(env, store, tn); return json({ ok: raw.ok, httpStatus: raw.status, normalized: normalizeUsps(raw.body), raw: raw.body }); }
+    catch (e) { return json({ error: String(e.message || e) }, 200); }
+  }
+  if (action === 'trackRun') {   // run the batch poller on demand (don't wait for cron)
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    try { const res = await runTracking(env, store, Number(body.limit) || 40); return json({ ok: true, ...res }); }
+    catch (e) { return json({ error: String(e.message || e) }, 200); }
+  }
+
   return json({ error: 'Unknown action' }, 400);
 }
 
@@ -314,5 +468,10 @@ export default {
       return new Response(res.body, { status: res.status, headers: h });
     }
     return res;
+  },
+  // Cron trigger (see wrangler.toml [triggers]): poll USPS for in-transit checks.
+  async scheduled(event, env, ctx) {
+    const store = makeStore(env.AP_HUB);
+    ctx.waitUntil(runTracking(env, store, 40).catch((e) => console.error('tracking cron failed', e)));
   },
 };

@@ -23,6 +23,23 @@ run_worker_first = true
 binding = "AP_HUB"
 id = "6a63cd74788a46519c2ad5773f78dab2"
 
+# --- Scheduled polling: USPS tracking refresh ---
+# Runs the Worker on a schedule to poll USPS for in-transit checks. Times are UTC.
+# ~every 3 hours; the poller self-throttles (bounded batch per run, oldest-checked first)
+# and no-ops entirely until the USPS_* secrets below are set — safe to ship dormant.
+[triggers]
+crons = ["17 */3 * * *"]
+
+# --- USPS Tracking API (set these as SECRETS via the Cloudflare dashboard) ---
+# Workers & Pages > captainjays-ap-hub > Settings > Variables and Secrets > add each
+# as an ENCRYPTED secret:
+#   USPS_CLIENT_ID       developer.usps.com app "Consumer Key"
+#   USPS_CLIENT_SECRET   developer.usps.com app "Consumer Secret"
+# Optional email alerts (Resend):
+#   RESEND_API_KEY       from resend.com
+#   ALERT_EMAIL          comma-separated recipients (e.g. vainvoices@captainjays.net)
+#   ALERT_FROM           a verified sender (e.g. alerts@captainjays.net)
+
 # --- Secrets (do NOT put real secrets in this file) ---
 # Set the session secret once with:
 #   npx wrangler secret put AP_HUB_SECRET
