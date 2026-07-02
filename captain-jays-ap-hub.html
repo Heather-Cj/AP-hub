@@ -125,7 +125,11 @@ button{font-family:inherit; cursor:pointer; border:none; background:none}
 .grid-2{display:grid;grid-template-columns:1.55fr 1fr;gap:18px}
 
 /* tables */
-.tablewrap{overflow:auto;max-height:calc(100vh - 200px)}
+.tablewrap{overflow:auto;max-height:calc(100vh - 250px);scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.tablewrap::-webkit-scrollbar{height:14px;width:14px;-webkit-appearance:none}
+.tablewrap::-webkit-scrollbar-thumb{background:var(--ink-3);border-radius:8px;border:3px solid var(--surface)}
+.tablewrap::-webkit-scrollbar-track{background:var(--surface-2)}
+.tablewrap::-webkit-scrollbar-corner{background:var(--surface-2)}
 table{width:100%;border-collapse:collapse}
 thead th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:600;
   text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface-2);position:sticky;top:0;z-index:3}
