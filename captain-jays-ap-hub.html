@@ -668,8 +668,7 @@ const App={
     // --- Pay & send ---
     if(can('record')) it.push({id:'payments',label:'Payments',ic:'card',section:'Pay & send',badge:()=>BILLS.filter(b=>b.stage==='ready'&&!b.payType&&!b.isChase).length||null});
     if(can('record')) it.push({id:'checks',label:'Checks',ic:'check',section:'Pay & send',badge:()=>BILLS.filter(b=>(b.isChase&&(b.chaseStage==='print'||b.chaseStage==='cut'||b.chaseStage==='deposit'))||(b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'))||(b.payType==='pickup'&&b.checkStage==='cut')).length||null});
-    if(can('record')||can('create')) it.push({id:'tracking',label:'Tracking',ic:'truck',section:'Pay & send',badge:()=>BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='send'||b.checkStage==='transit')).length||null});
-    if(can('pickup')) it.push({id:'pickups',label:'Pickups',ic:'truck',section:'Pay & send',badge:()=>BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup').length||null});
+    if(can('record')||can('create')) it.push({id:'tracking',label:'Tracking',ic:'truck',section:'Pay & send',badge:()=>BILLS.filter(b=>(!b.isChase&&b.payType==='check'&&(b.checkStage==='send'||b.checkStage==='transit'))||(b.payType==='pickup'&&b.checkStage==='pickup')).length||null});
     // --- Manage ---
     it.push({id:'vendors',label:'Vendors',ic:'vendor',section:'Manage'});
     it.push({id:'eom',label:'EOM Tracker',ic:'cal',section:'Manage'});
@@ -785,7 +784,7 @@ const App={
   render(){if(!CURRENT)return;
     const titles={dashboard:['Dashboard',CURRENT.name+' · '+ROLES[CURRENT.role]],submissions:['Submissions','Trainee entries awaiting submit'],
       approvals:['Approvals','Bills routed to you for sign-off'],issues:['Ongoing issues','Bills held back until a problem is resolved'],inbox:['Inbox','New bills to code and route'],bills:['All bills','Every bill across its lifecycle'],unpaid:['Unpaid bills','Open bills not yet paid'],reports:['Reports','AP aging, spend, and vendor totals'],
-      payments:['Payments','All payments — make payment & track status'],checks:['Checks Processing','Print, cut, then deposit Chase checks'],tracking:['Tracking','Checks to mail — sent & delivery status'],pickups:['Pickups','Checks to be collected'],
+      payments:['Payments','All payments — make payment & track status'],checks:['Checks Processing','Print, cut, then deposit Chase checks'],tracking:['Tracking','Checks to mail, in transit, delivered & pickups'],pickups:['Pickups','Checks to be collected'],
       vendors:['Vendors','Master list · active & inactive'],accounts:['Accounts','Store & entity codes'],users:['Users','Logins & access'],activity:['Activity','Logins & every action — saved'],deleted:['Deleted','Recoverable — admin only']};
     $('#vTitle').textContent=(titles[this.state.view]||[''])[0];
     $('#vSub').textContent=(titles[this.state.view]||['',''])[1];
@@ -1151,8 +1150,10 @@ const App={
     const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'check':return b.checkNumber||'';case 'sent':return (b.sent&&b.sent.date)||'';case 'tracking':return (b.sent&&b.sent.tracking)||'';case 'delivered':return (b.delivered&&b.delivered.date)||'';case 'batch':return (b.printed&&b.printed.batch)||0;case 'invdate':return b.invoiceDate||'';case 'printed':return (b.printed&&b.printed.date)||'';default:return (b.vendor||'').toLowerCase();}};
     const tsort=arr=>arr.slice().sort((a,b)=>{const x=tval(a),y=tval(b);if(x<y)return -1*tdir;if(x>y)return 1*tdir;return (a.id-b.id)*tdir;});
     const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
-    const tabs=[['send','To be sent out',toSend.length],['transit','On the way',transit.length],['delivered','Delivered',delivered.length]];
+    const pickReady=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup');
+    const tabs=[['send','To be sent out',toSend.length],['transit','On the way',transit.length],['delivered','Delivered',delivered.length],['pickups','Pickups',pickReady.length]];
     const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-tracktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}${(can('record')||can('create'))?`<div style="margin-left:auto"><input type="file" id="uspsfile" accept="application/pdf" style="display:none" onchange="App.importUspsPdf(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('uspsfile').value='';document.getElementById('uspsfile').click()">${svg(ICN.truck,14)} Import USPS PDF</button></div>`:''}</div>`;
+    if(tab==='pickups')return tabBar+this.v_pickups();
     let body='';
     if(tab==='send'){
       const rows=tsort(toSend);
