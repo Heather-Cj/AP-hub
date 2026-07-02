@@ -1002,12 +1002,23 @@ const App={
       return '';
     };
     const prow=b=>`<tr class="click" data-bill="${b.id}">
+        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.receivedDate?fmtD(b.receivedDate):'—'}${b.receivedEdited?' <span class="badge b-amber" style="font-size:8px;padding:0 4px">e</span>':''}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</td>
+        <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account||'—'}</span></td>
         <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
-        <td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td>
         <td class="mono" style="font-size:12px">${invOf(b)}</td>
+        <td style="max-width:180px;font-size:12px;color:var(--ink-2)"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(b.comments||'').replace(/"/g,'&quot;')}">${b.comments?String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;'):'—'}</div></td>
         <td class="r mono" style="font-weight:700">${money(b.amount)}</td>
-        <td style="font-size:12.5px">${b.method||(()=>{const vd=vendor(b.vendor);return vd&&vd.m?`<span style="color:var(--ink-3)">${vd.m==='To be Picked Up'?'Pickup':vd.m} <span style="font-size:10px">· default</span></span>`:'<span style="color:var(--ink-3)">at payment</span>';})()}${b.payType==='check'?' '+statusBadge(b):''}${b.checkNumber?' <span class="mono" style="color:var(--ink-3);font-size:11px">#'+b.checkNumber+'</span>':''}</td>
+        <td style="font-size:12.5px">${b.method||(()=>{const vd=vendor(b.vendor);return vd&&vd.m?`<span style="color:var(--ink-3)">${vd.m==='To be Picked Up'?'Pickup':vd.m} <span style="font-size:10px">· default</span></span>`:'<span style="color:var(--ink-3)">at payment</span>';})()}</td>
+        <td>${statusBadge(b)}</td>
+        <td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.printed?fmtD(b.printed.date):'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):'—'}</td>
+        <td style="font-size:12px">${(b.paid&&b.paid.initials)||b.enteredInitials||'—'}</td>
+        <td class="mono" style="font-weight:700">#${b.id}</td>
+        <td class="mono" style="font-size:11px;color:var(--ink-3);white-space:nowrap">${b.createdAt?fmtDT(b.createdAt):(b.receivedDate?fmtD(b.receivedDate):'—')}</td>
+        <td class="mono" style="font-size:11px;color:var(--ink-3);white-space:nowrap">${b.modifiedAt?fmtDT(b.modifiedAt):'—'}</td>
         <td>${urgencyChip(b)||'<span style="color:var(--ink-3);font-size:12px">—</span>'}</td>
         <td class="r">${can('record')?nextAction(b):''}</td>
       </tr>`;
@@ -1017,28 +1028,34 @@ const App={
     if(payTab==='pending'){body=`
     <div class="card"><div class="card-h"><h3>Pending payment</h3><span class="sub">${pending.length} · checks stay here until sent</span></div>
       ${can('record')&&batchable.length?`<div style="padding:10px 16px;border-bottom:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" onclick="App.toggleBatch()">${svg(ICN.dollar,13)} Batch pay by vendor ${this.state.showBatch?'▴ hide':'▾ show'} <span style="color:var(--ink-3)">· ${batchable.length} vendor${batchable.length!==1?'s':''} with 2+ bills</span></button>${this.state.showBatch?`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${batchable.map(([v,arr])=>`<button class="btn btn-ghost btn-sm" style="border:1px solid var(--gold)" onclick="App.openBatchPay('${v.replace(/'/g,"\\'")}')">Pay all ${v} <b>(${arr.length})</b> · ${money(arr.reduce((s,b)=>s+(+b.amount||0),0))}</button>`).join('')}</div>`:''}</div>`:''}
-      <div class="tablewrap"><table><thead><tr><th>Vendor</th><th>Account</th><th>Invoice</th><th class="r">Amount</th><th>Method</th><th>Due</th><th>Send status</th><th class="r"></th></tr></thead>
-      <tbody>${pending.length?pending.map(prow).join(''):`<tr><td colspan="8"><div class="empty">${svg(ICN.card,30)}<div>Nothing pending. Approved bills land here.</div></div></td></tr>`}</tbody></table></div>
+      <div class="tablewrap"><table><thead><tr><th>Received</th><th>Inv. date</th><th>Account</th><th>Vendor</th><th>Invoice #</th><th>Comment</th><th class="r">Amount</th><th>Method</th><th>Status</th><th>Check #</th><th>Printed</th><th>Due</th><th>Paid</th><th>By</th><th>ID</th><th>Created</th><th>Modified</th><th>Send status</th><th class="r"></th></tr></thead>
+      <tbody>${pending.length?pending.map(prow).join(''):`<tr><td colspan="19"><div class="empty">${svg(ICN.card,30)}<div>Nothing pending. Approved bills land here.</div></div></td></tr>`}</tbody></table></div>
     </div>`;}else{body=`
     <div class="filters">
       ${this.filterControls(false,true)}
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${ptotal} payment${ptotal!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="payments">${svg(ICN.bills,14)} Export Excel</button>`:''}</div>
     </div>
     <div class="card"><div class="card-h"><h3>All payments</h3><span class="sub">paid, in process & Chase</span></div>
-      <div class="tablewrap"><table><thead><tr>${this.sortHdr('id','ID')}${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('date','Date')}<th>By</th>${this.sortHdr('created','Created')}${this.sortHdr('modified','Modified')}</tr></thead>
+      <div class="tablewrap"><table><thead><tr>${this.sortHdr('received','Received')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('comment','Comment')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th>${this.sortHdr('id','ID')}${this.sortHdr('created','Created')}${this.sortHdr('modified','Modified')}</tr></thead>
       <tbody>${pshown.length?pshown.map(b=>`<tr class="click" data-bill="${b.id}">
-        <td class="mono" style="font-weight:700">#${b.id}</td>
-        <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account}</span></td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.receivedDate?fmtD(b.receivedDate):'—'}${b.receivedEdited?' <span class="badge b-amber" style="font-size:8px;padding:0 4px">e</span>':''}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</td>
+        <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account||'—'}</span></td>
         <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
+        <td class="mono" style="font-size:12px">${invOf(b)}</td>
+        <td style="max-width:180px;font-size:12px;color:var(--ink-2)"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(b.comments||'').replace(/"/g,'&quot;')}">${b.comments?String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;'):'—'}</div></td>
         <td class="r mono" style="font-weight:600">${money(b.amount)}</td>
         <td style="font-size:12.5px">${b.method||'—'}${b.paidViaChase?' <span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':''}</td>
         <td>${statusBadge(b)}</td>
         <td class="mono" style="font-size:12px">${b.checkNumber||(b.isChase&&b.tracking)||'—'}</td>
-        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):(b.printed?fmtD(b.printed.date):'—'))}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.printed?fmtD(b.printed.date):'—'}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):'—')}</td>
         <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||(b.printed&&b.printed.initials)||'—'}</td>
+        <td class="mono" style="font-weight:700">#${b.id}</td>
         <td class="mono" style="font-size:11px;color:var(--ink-3);white-space:nowrap">${b.createdAt?fmtDT(b.createdAt):(b.receivedDate?fmtD(b.receivedDate):'—')}</td>
         <td class="mono" style="font-size:11px;color:var(--ink-3);white-space:nowrap">${b.modifiedAt?fmtDT(b.modifiedAt):'—'}</td>
-      </tr>`).join(''):`<tr><td colspan="11"><div class="empty">${svg(ICN.check,30)}<div>No payments yet.</div></div></td></tr>`}</tbody></table></div></div>`;}
+      </tr>`).join(''):`<tr><td colspan="17"><div class="empty">${svg(ICN.check,30)}<div>No payments yet.</div></div></td></tr>`}</tbody></table></div></div>`;}
     return tabBar+body;
   },
   setPayTab(t){this.state.payTab=t;this.render();},
