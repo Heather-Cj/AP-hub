@@ -1272,7 +1272,7 @@ const App={
         <select class="selent" onchange="App.vfilter('method',this.value)" style="font-size:12.5px"><option value="all"${fm==='all'?' selected':''}>All methods</option>${METHODS.map(m=>`<option value="${m}"${fm===m?' selected':''}>${m}</option>`).join('')}<option value="(none)"${fm==='(none)'?' selected':''}>No method</option></select>
         <select class="selent" onchange="App.vfilter('status',this.value)" style="font-size:12.5px"><option value="active"${fs==='active'?' selected':''}>Active</option><option value="inactive"${fs==='inactive'?' selected':''}>Inactive</option><option value="all"${fs==='all'?' selected':''}>All statuses</option></select>
         ${(fm!=='all'||fs!=='active'||q)?`<button class="btn btn-ghost btn-sm" onclick="App.vclear()">Clear</button>`:''}
-        ${can('vendors_add')?`<button class="btn btn-gold btn-sm" data-addvendor>${svg(ICN.plus,14)} Add vendor</button>`:''}
+        ${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" onclick="App.openMergeVendors()">${svg(ICN.vendor,14)} Merge vendors</button>`:''}${can('vendors_add')?`<button class="btn btn-gold btn-sm" data-addvendor>${svg(ICN.plus,14)} Add vendor</button>`:''}
       </div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 12px">${chips}</div>
@@ -1292,6 +1292,46 @@ const App={
     this.persist();this.render();},
   reopenVendorIssue(name,id){const v=vendor(name);if(!v||!can('vendors_add')||!v.issues)return;const it=v.issues.find(x=>x.id===id);if(it){it.status='open';it.resolvedAt=null;}this.persist();this.render();},
   delVendorIssue(name,id){const v=vendor(name);if(!v||!canDelete()||!v.issues)return;v.issues=v.issues.filter(x=>x.id!==id);this.persist();this.render();},
+  /* ---------- merge duplicate vendors (admin) ---------- */
+  openMergeVendors(){if(CURRENT.role!=='admin')return;
+    const names=VENDORS.slice().sort((a,b)=>a.n.localeCompare(b.n)).map(v=>v.n);
+    const opts=sel=>names.map(n=>`<option${n===sel?' selected':''}>${n.replace(/</g,'&lt;')}</option>`).join('');
+    const html=`<div id="mergemodal" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:grid;place-items:center" onclick="if(event.target===this)document.getElementById('mergemodal').remove()">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px 24px;width:520px;max-width:94vw;box-shadow:0 30px 90px rgba(0,0,0,.4)">
+        <div style="display:flex;align-items:center;margin-bottom:14px"><h3 style="font-size:16px;font-weight:700">Merge vendors</h3><button class="x" onclick="document.getElementById('mergemodal').remove()" style="margin-left:auto">${svg(ICN.x,16)}</button></div>
+        <p style="font-size:12.5px;color:var(--ink-2);margin-bottom:14px">Everything on the duplicate — bills, notes, issues, store account #s — moves to the vendor you keep. The duplicate goes to the Deleted folder (recoverable).</p>
+        <div class="field"><label>Duplicate (goes away)</label><select id="mv_src" class="selent" style="width:100%">${opts('')}</select></div>
+        <div class="field"><label>Keep (everything moves here)</label><select id="mv_dst" class="selent" style="width:100%">${opts('')}</select></div>
+        <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end"><button class="btn btn-ghost" onclick="document.getElementById('mergemodal').remove()">Cancel</button><button class="btn btn-gold" onclick="App.mergeVendors()">${svg(ICN.check,14)} Merge</button></div>
+      </div></div>`;
+    const old=document.getElementById('mergemodal');if(old)old.remove();
+    document.body.insertAdjacentHTML('beforeend',html);
+  },
+  mergeVendors(){if(CURRENT.role!=='admin')return;
+    const src=($('#mv_src')||{}).value,dst=($('#mv_dst')||{}).value;
+    if(!src||!dst){this.toast('Pick both vendors');return;}
+    if(src===dst){this.toast('Pick two different vendors');return;}
+    const vs=vendor(src),vd=vendor(dst);if(!vs||!vd){this.toast('Vendor not found');return;}
+    const count=BILLS.filter(b=>b.vendor===src).length;
+    if(!confirm('Merge "'+src+'" into "'+dst+'"?\n\n'+count+' bill'+(count!==1?'s':'')+' will move to '+dst+'. The duplicate vendor goes to Deleted (recoverable).'))return;
+    let moved=0;
+    BILLS.forEach(b=>{if(b.vendor===src){b.vendor=dst;moved++;}});
+    (DELETED.bills||[]).forEach(b=>{if(b.vendor===src)b.vendor=dst;});
+    vd.notes=[...(vs.notes||[]),...(vd.notes||[])];
+    vd.issues=[...(vs.issues||[]),...(vd.issues||[])];
+    vd.docs=[...(vs.docs||[]),...(vd.docs||[])];
+    vd.accounts=Object.assign({},vs.accounts||{},vd.accounts||{});
+    if(vd.prevYr==null&&vs.prevYr!=null)vd.prevYr=vs.prevYr;
+    if(!vd.a&&vs.a)vd.a=vs.a;
+    if(!vd.m&&vs.m)vd.m=vs.m;
+    if(!vd.approver&&vs.approver)vd.approver=vs.approver;
+    if(!vd.payUrl&&vs.payUrl)vd.payUrl=vs.payUrl;
+    VENDORS=VENDORS.filter(v=>v.n!==src);
+    vs._deletedAt=Date.now();DELETED.vendors.unshift(vs);
+    this.log('Merged vendors',src+' → '+dst+' · '+moved+' bills moved');
+    const mm=document.getElementById('mergemodal');if(mm)mm.remove();
+    this.persist();this.toast('Merged '+src+' into '+dst+' · '+moved+' bills');this.render();
+  },
   addVendorNote(name){const v=vendor(name);if(!v||!can('vendors_add'))return;const t=($('#vnote_input')?$('#vnote_input').value:'').trim();if(!t){this.toast('Type a note first');return;}(v.notes=v.notes||[]).push({at:Date.now(),by:CURRENT.initials,text:t});this.log('Added vendor note',v.n);this.persist();this.toast('Note added');this.render();},
   delVendorNote(name,i){const v=vendor(name);if(!v||!canDelete()||!v.notes)return;v.notes.splice(i,1);this.persist();this.render();},
   addVendorAttachment(name){const v=vendor(name);if(!v||!can('vendors_add'))return;const url=($('#vatt_url')?$('#vatt_url').value:'').trim(),nm=($('#vatt_name')?$('#vatt_name').value:'').trim();if(!url){this.toast('Paste a link first');return;}(v.attachments=v.attachments||[]).push({at:Date.now(),by:CURRENT.initials,name:nm||url,url});this.log('Added vendor attachment',v.n);this.persist();this.toast('Attachment added');this.render();},
@@ -1375,27 +1415,44 @@ const App={
   setReportTab(t){this.state.reportTab=t;this.render();},
   toggleReadiness(){this.state.showReadiness=!this.state.showReadiness;this.render();},
   toggleBatch(){this.state.showBatch=!this.state.showBatch;this.render();},
+  setReportAsOf(d){this.state.reportAsOf=d||todayISO;this.render();},
   reportData(){
-    const open=BILLS.filter(b=>!b.isChase&&billUnpaid(b));
-    const paid=BILLS.filter(b=>!b.isChase&&b.stage==='paid');
-    const now=Date.now();
+    // AP aging supports an "as of" date: reconstructs which bills were open on that day
+    const asOf=this.state.reportAsOf||todayISO;
+    const isToday=asOf>=todayISO;
+    const payD=b=>(b.paid&&b.paid.date)||(b.delivered&&b.delivered.date)||(b.pickedUp&&b.pickedUp.date)||'';
+    const open=BILLS.filter(b=>{
+      if(b.isChase||b.stage==='rejected')return false;
+      if(isToday)return billUnpaid(b);
+      if((b.receivedDate||'')>asOf)return false;
+      const pd=payD(b);
+      return !(pd&&pd<=asOf);
+    });
+    const asT=new Date(asOf+'T00:00').getTime();
     const ag={};
     open.forEach(b=>{const v=b.vendor||'(none)';ag[v]=ag[v]||{vendor:v,current:0,d1_30:0,d31_60:0,d61_90:0,d90:0,total:0};
-      const days=b.due?Math.floor((now-new Date(b.due+'T00:00').getTime())/86400000):0;
+      const days=b.due?Math.floor((asT-new Date(b.due+'T00:00').getTime())/86400000):0;
       const k=days<=0?'current':days<=30?'d1_30':days<=60?'d31_60':days<=90?'d61_90':'d90';
       const amt=+b.amount||0;ag[v][k]+=amt;ag[v].total+=amt;});
     const aging=Object.values(ag).sort((a,b)=>b.total-a.total);
+    const paid=BILLS.filter(b=>!b.isChase&&b.stage==='paid');
     const glm={};paid.forEach(b=>{const g=b.gl||'(uncoded)';glm[g]=(glm[g]||0)+(+b.amount||0);});
     const spendGl=Object.entries(glm).map(([gl,amt])=>({gl,amt})).sort((a,b)=>b.amt-a.amt);
     const vsm={};paid.forEach(b=>{const v=b.vendor||'(none)';vsm[v]=vsm[v]||{vendor:v,count:0,total:0};vsm[v].count++;vsm[v].total+=(+b.amount||0);});
     const vendorSpend=Object.values(vsm).sort((a,b)=>b.total-a.total);
-    return {aging,spendGl,vendorSpend};
+    // Store trends: month-over-month totals per store/account (by received month)
+    const stm={},monthsSet={};
+    BILLS.forEach(b=>{if(b.isChase)return;const mk=monthKey(b.receivedDate);if(!mk)return;monthsSet[mk]=1;const a=b.account||'—';(stm[a]=stm[a]||{})[mk]=(stm[a][mk]||0)+(+b.amount||0);});
+    const months=Object.keys(monthsSet).sort();
+    const storeRows=Object.entries(stm).map(([acct,m])=>({acct,m,total:Object.values(m).reduce((x,y)=>x+y,0)})).sort((a,b)=>b.total-a.total);
+    return {aging,spendGl,vendorSpend,asOf,months,storeRows};
   },
   downloadReport(tab){
     const d=this.reportData();let cols,rows,name;const f=n=>(+n||0).toFixed(2);
     if(tab==='gl'){name='spend-by-gl';cols=['GL account','Total paid'];rows=d.spendGl.map(r=>[r.gl,f(r.amt)]);}
     else if(tab==='vendor'){name='vendor-spend';cols=['Vendor','Bills','Total paid'];rows=d.vendorSpend.map(r=>[r.vendor,r.count,f(r.total)]);}
-    else{name='ap-aging';cols=['Vendor','Current','1-30','31-60','61-90','90+','Total'];rows=d.aging.map(r=>[r.vendor,f(r.current),f(r.d1_30),f(r.d31_60),f(r.d61_90),f(r.d90),f(r.total)]);}
+    else if(tab==='stores'){name='store-trends';cols=['Store',...d.months,'Total'];rows=d.storeRows.map(r=>[r.acct,...d.months.map(m=>f(r.m[m]||0)),f(r.total)]);}
+    else{name='ap-aging-'+d.asOf;cols=['Vendor','Current','1-30','31-60','61-90','90+','Total'];rows=d.aging.map(r=>[r.vendor,f(r.current),f(r.d1_30),f(r.d31_60),f(r.d61_90),f(r.d90),f(r.total)]);}
     const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
     const csv=[cols.join(','),...rows.map(r=>r.map(esc).join(','))].join('\n');
     const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');
@@ -1404,11 +1461,11 @@ const App={
   },
   v_reports(){
     const tab=this.state.reportTab||'aging';const d=this.reportData();
-    const tabs=[['aging','AP aging'],['gl','Spend by GL'],['vendor','Vendor spend']];
-    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" onclick="App.setReportTab('${k}')">${l}</button>`).join('')}<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="App.downloadReport('${tab}')">${svg(ICN.arrow,14)} Download CSV</button></div>`;
+    const tabs=[['aging','AP aging'],['gl','Spend by GL'],['vendor','Vendor spend'],['stores','Store trends']];
+    const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" onclick="App.setReportTab('${k}')">${l}</button>`).join('')}${tab==='aging'?`<span style="font-size:12px;color:var(--ink-3);margin-left:8px">As of</span><input type="date" class="selent" value="${d.asOf}" onchange="App.setReportAsOf(this.value)" style="padding:5px 8px">`:''}<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="App.downloadReport('${tab}')">${svg(ICN.arrow,14)} Download CSV</button></div>`;
     let body='';
     if(tab==='aging'){
-      body=`<div class="card"><div class="card-h"><h3>AP aging</h3><span class="sub">${d.aging.length} vendor${d.aging.length!==1?'s':''} with open balances</span></div>
+      body=`<div class="card"><div class="card-h"><h3>AP aging${d.asOf<todayISO?' · as of '+fmtD(d.asOf):''}</h3><span class="sub">${d.aging.length} vendor${d.aging.length!==1?'s':''} with open balances</span></div>
         <div class="tablewrap"><table><thead><tr><th>Vendor</th><th class="r">Current</th><th class="r">1–30</th><th class="r">31–60</th><th class="r">61–90</th><th class="r">90+</th><th class="r">Total</th></tr></thead>
         <tbody>${d.aging.length?d.aging.map(r=>`<tr><td>${r.vendor}</td><td class="r mono">${r.current?money(r.current):'—'}</td><td class="r mono">${r.d1_30?money(r.d1_30):'—'}</td><td class="r mono">${r.d31_60?money(r.d31_60):'—'}</td><td class="r mono">${r.d61_90?money(r.d61_90):'—'}</td><td class="r mono"${r.d90?' style="color:var(--red);font-weight:600"':''}>${r.d90?money(r.d90):'—'}</td><td class="r mono" style="font-weight:700">${money(r.total)}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.check,28)}<div>No open bills — nothing aging.</div></div></td></tr>`}</tbody></table></div></div>`;
     }else if(tab==='gl'){
@@ -1416,11 +1473,17 @@ const App={
       body=`<div class="card"><div class="card-h"><h3>Spend by GL account</h3><span class="sub">paid bills · ${money(tot)}</span></div>
         <div class="tablewrap"><table><thead><tr><th>GL account</th><th class="r">Total paid</th></tr></thead>
         <tbody>${d.spendGl.length?d.spendGl.map(r=>`<tr><td>${r.gl}</td><td class="r mono" style="font-weight:600">${money(r.amt)}</td></tr>`).join(''):`<tr><td colspan="2"><div class="empty">No paid bills yet.</div></td></tr>`}</tbody></table></div></div>`;
-    }else{
+    }else if(tab==='vendor'){
       const tot=d.vendorSpend.reduce((a,r)=>a+r.total,0);
       body=`<div class="card"><div class="card-h"><h3>Vendor spend</h3><span class="sub">all-time paid · ${money(tot)} · use for 1099 prep</span></div>
         <div class="tablewrap"><table><thead><tr><th>Vendor</th><th class="r">Bills</th><th class="r">Total paid</th></tr></thead>
         <tbody>${d.vendorSpend.length?d.vendorSpend.map(r=>`<tr class="click" onclick="App.openVendorView('${r.vendor.replace(/'/g,"\\'")}')"><td><b style="color:var(--blue)">${r.vendor}</b></td><td class="r mono">${r.count}</td><td class="r mono" style="font-weight:600">${money(r.total)}</td></tr>`).join(''):`<tr><td colspan="3"><div class="empty">No paid bills yet.</div></td></tr>`}</tbody></table></div></div>`;
+    }else{
+      const showM=d.months.slice(-6);
+      const mlbl=mk=>this.monthLabel?this.monthLabel(mk):mk;
+      body=`<div class="card"><div class="card-h"><h3>Store trends</h3><span class="sub">month-over-month billed per store · showing last ${showM.length} month${showM.length!==1?'s':''} (CSV has all)</span></div>
+        <div class="tablewrap"><table><thead><tr><th>Store</th>${showM.map(m=>`<th class="r">${mlbl(m)}</th>`).join('')}<th class="r">Total (all)</th></tr></thead>
+        <tbody>${d.storeRows.length?d.storeRows.map(r=>`<tr><td><span class="entity-chip"><span class="pin"></span>${r.acct}</span></td>${showM.map(m=>{const v=r.m[m]||0;const prev=r.m[showM[showM.indexOf(m)-1]]||0;const up=showM.indexOf(m)>0&&prev>0&&v>prev*1.15;const dn=showM.indexOf(m)>0&&prev>0&&v<prev*0.85&&v>0;return `<td class="r mono"${up?' style="color:var(--red)"':dn?' style="color:var(--green,#16a34a)"':''}>${v?money(v):'—'}</td>`;}).join('')}<td class="r mono" style="font-weight:700">${money(r.total)}</td></tr>`).join(''):`<tr><td colspan="${showM.length+2}"><div class="empty">No bills yet.</div></td></tr>`}</tbody></table></div></div>`;
     }
     return tabBar+body;
   },
@@ -1440,6 +1503,15 @@ const App={
         <p style="font-size:11.5px;color:var(--ink-3);margin-top:10px">Currently ${billCount} bills, ${VENDORS.length} vendors, ${USERS.length} users on file.</p>
       </div>
     </div>
+    <div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Server backups</h3><span class="sub">automatic · nightly · keeps 7 days</span></div>
+      <div style="padding:16px 18px">
+        <p style="font-size:13px;color:var(--ink-2);margin-bottom:14px">The server snapshots all bills, vendors and users every night (≈4:47am ET) and keeps the last 7 days — no one has to remember to download anything. You can also snapshot right now, or restore a previous day.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-gold btn-sm" onclick="App.serverBackupNow()">${svg(ICN.check,14)} Back up now</button>
+          <button class="btn btn-ghost btn-sm" onclick="App.serverBackupList()">${svg(ICN.clock,14)} View / restore backups</button>
+        </div>
+      </div>
+    </div>
     <div class="card"><div class="card-h"><h3>Danger zone</h3><span class="sub">irreversible</span></div>
       <div style="padding:16px 18px">
         <p style="font-size:13px;color:var(--ink-2)">To completely wipe all data, do it from your hosting dashboard (Netlify → Blobs) and delete the <span class="mono">bills:</span>, <span class="mono">meta</span>, and <span class="mono">users</span> keys. There is intentionally no one-click wipe inside the portal. <b>Always download a backup first.</b></p>
@@ -1457,6 +1529,28 @@ const App={
     return `<div class="filters"><span style="color:var(--ink-3);font-size:13px">${ACCOUNTS.length} accounts · ${BILLS.filter(b=>!b.isChase).length} bills on file</span><div style="margin-left:auto">${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div></div>
       <div class="section-title">Entities</div>${tbl('accE',ents)}
       <div class="section-title">Stores (${stores.length})</div>${tbl('accS',stores)}`;
+  },
+  /* ---------- server-side KV backups (admin) ---------- */
+  async serverBackupNow(){if(CURRENT.role!=='admin')return;
+    this.toast('Backing up…');
+    try{const r=await API.call('backupNow',{token:TOKEN});
+      this.toast(r.ok?('✓ Server backup done — '+(r.bills||0)+' bills ('+r.day+')'):(r.error||'Backup failed'));
+    }catch(e){this.toast('Backup failed: '+(e.message||e));}
+  },
+  async serverBackupList(){if(CURRENT.role!=='admin')return;
+    try{
+      const r=await API.call('backupStatus',{token:TOKEN});
+      const list=r.backups||[];
+      if(!list.length){this.toast('No server backups yet — the first runs tonight (or click Back up now)');return;}
+      const day=prompt('Server backups on file (oldest → newest):\n\n'+list.join('\n')+'\n\nTo RESTORE one, type its date exactly as shown. Otherwise Cancel.');
+      if(!day)return;
+      const d=day.trim();
+      if(!list.includes(d)){this.toast('No backup for "'+d+'"');return;}
+      if(!confirm('Restore the '+d+' snapshot?\n\nThis REPLACES all current bills with that day’s data. Anything entered since then will be lost (a fresh backup of today is taken first is NOT automatic — click Back up now first if unsure). Everyone’s open tabs will reload.'))return;
+      const r2=await API.call('backupRestore',{token:TOKEN,day:d});
+      if(r2.ok){alert('Restored '+r2.bills+' bills from '+d+'. Reloading…');try{LS.del('aphub_ops');}catch(e){}location.reload();}
+      else this.toast(r2.error||'Restore failed');
+    }catch(e){this.toast('Failed: '+(e.message||e));}
   },
   downloadBackup(){
     if(CURRENT.role!=='admin')return;
@@ -1673,6 +1767,7 @@ const App={
   delBillComment(id,cid){const b=BILLS.find(x=>x.id===+id);if(!b||!canDelete()||!b.commentThread)return;b.commentThread=b.commentThread.filter(c=>c.id!==cid);this.persist();this.openBill(id);},
   /* ---------- ongoing issues: hold a bill back / send it on ---------- */
   flagIssue(id){const b=BILLS.find(x=>x.id===id);if(!b)return;
+    if(!(CURRENT.role==='admin'||this.canApproveAny()||can('create')))return;
     const prev=(b.issue&&b.issue.reason)||'';
     const reason=(prompt('What is the issue with this bill? It will be held in Ongoing issues and shown on the vendor until resolved.',prev)||'').trim();
     if(!reason)return;
@@ -1691,6 +1786,7 @@ const App={
     this.persist();this.toast('Bill #'+b.id+' moved to Ongoing issues');this.render();
   },
   resolveIssue(id){const b=BILLS.find(x=>x.id===id);if(!b||b.stage!=='issue')return;
+    if(!(CURRENT.role==='admin'||this.canApproveAny()||can('create')))return;
     b.issue=null;b._preIssue=null;
     const v=vendor(b.vendor);
     if(v&&v.issues){const it=v.issues.find(x=>x.billId===b.id&&x.status!=='resolved');if(it){it.status='resolved';it.resolvedAt=Date.now();it.resolvedBy=CURRENT.initials;}}
@@ -1789,7 +1885,7 @@ const App={
     this.logBill(b,'Paid',b.vendor+' · '+money(b.amount)+' · '+method);
     return {paid:true};
   },
-  recordPaid(id){const b=BILLS.find(x=>x.id===id);if(!b)return;
+  recordPaid(id){const b=BILLS.find(x=>x.id===id);if(!b||!can('record'))return;
     const method=$('#r_method').value;const date=readDate('#r_date')||todayISO;
     if(FAISAL.includes(b.account)&&method==='ACH'){this.toast('Account '+b.account+' is check-only — pick a check method');return;}
     const check=$('#r_check')?($('#r_check').value||'').trim():'';
@@ -1981,7 +2077,7 @@ const App={
       </div>
       <div class="dr-foot"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.doPrint(${b.id})">${svg(ICN.check,14)} Print check</button></div>`);
   },
-  doPrint(id){const b=BILLS.find(x=>x.id===+id);if(!b)return;
+  doPrint(id){const b=BILLS.find(x=>x.id===+id);if(!b||!can('record'))return;
     const check=$('#pr_check')?($('#pr_check').value||'').trim():'';const date=readDate('#pr_date')||todayISO;
     const batch=Math.floor(printedCount()/CHECK_BATCH)+1;
     b.checkNumber=check;b.printed={date,by:CURRENT.u,initials:CURRENT.initials,batch};

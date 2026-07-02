@@ -6,6 +6,9 @@
 name = "captainjays-ap-hub"
 main = "worker.mjs"
 compatibility_date = "2026-01-01"
+# Keep dashboard-set variables/secrets across deploys. Without this, every CI deploy
+# wiped any vars added in the Cloudflare dashboard (why the USPS keys never "took").
+keep_vars = true
 
 # --- Static assets: serves your HTML file (and anything in ./public) ---
 # Put captain-jays-ap-hub.html in ./public/index.html so it loads at the root URL.
@@ -28,7 +31,8 @@ id = "6a63cd74788a46519c2ad5773f78dab2"
 # ~every 3 hours; the poller self-throttles (bounded batch per run, oldest-checked first)
 # and no-ops entirely until the USPS_* secrets below are set — safe to ship dormant.
 [triggers]
-crons = ["17 */3 * * *"]
+# 3-hourly: USPS tracking poll · nightly 08:47 UTC (~4:47am ET): KV backup (keep 7 days)
+crons = ["17 */3 * * *", "47 8 * * *"]
 
 # --- USPS Tracking API (set these as SECRETS via the Cloudflare dashboard) ---
 # Workers & Pages > captainjays-ap-hub > Settings > Variables and Secrets > add each

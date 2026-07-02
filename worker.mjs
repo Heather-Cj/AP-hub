@@ -325,6 +325,35 @@ async function runTracking(env, store, limit = 40) {
   return { candidates: cand.length, polled: batch.length, updated: touched.size, alerts: alerts.length };
 }
 
+// ---------- nightly server-side backup (KV → backup:YYYY-MM-DD:* keys, keep 7) ----------
+async function runBackup(env, store) {
+  const meta = await store.getJSON('meta');
+  if (!meta) return { skipped: 'no-meta' };
+  const day = new Date().toISOString().slice(0, 10);
+  await store.setJSON('backup:' + day + ':meta', meta);
+  const shards = Array.isArray(meta.shards) ? meta.shards : [];
+  let bills = 0;
+  for (const mk of shards) {
+    const c = await store.getJSON('bills:' + mk);
+    if (c) { await store.setJSON('backup:' + day + ':bills:' + mk, c); bills += c.length; }
+  }
+  const users = await store.getJSON('users');
+  if (users) await store.setJSON('backup:' + day + ':users', users);
+  // rolling index; prune to the last 7 snapshots (each old backup's own shard list)
+  let idx = (await store.getJSON('backup_index')) || [];
+  if (!idx.includes(day)) idx.push(day);
+  idx.sort();
+  while (idx.length > 7) {
+    const old = idx.shift();
+    const om = await store.getJSON('backup:' + old + ':meta');
+    const os = (om && Array.isArray(om.shards)) ? om.shards : [];
+    for (const mk of os) { try { await store.del('backup:' + old + ':bills:' + mk); } catch {} }
+    try { await store.del('backup:' + old + ':meta'); await store.del('backup:' + old + ':users'); } catch {}
+  }
+  await store.setJSON('backup_index', idx);
+  return { day, shards: shards.length, bills };
+}
+
 // ---------- the API handler ----------
 async function handleApi(req, env) {
   const SECRET = env.AP_HUB_SECRET || 'PLEASE-SET-AP_HUB_SECRET';
@@ -430,6 +459,38 @@ async function handleApi(req, env) {
     catch (e) { return json({ error: String(e.message || e), status: e.status || 500 }, 200); }
   }
 
+  // --- server backups (admin) ---
+  if (action === 'backupStatus') {
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    const idx = (await store.getJSON('backup_index')) || [];
+    const meta = await store.getJSON('meta');
+    return json({ backups: idx, lastSaveAt: (meta && meta.savedAt) || null });
+  }
+  if (action === 'backupNow') {
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    try { const r = await runBackup(env, store); return json({ ok: true, ...r }); }
+    catch (e) { return json({ error: String(e.message || e) }, 200); }
+  }
+  if (action === 'backupRestore') {
+    if (tok.role !== 'admin') return json({ error: 'Admins only' }, 403);
+    const day = String(body.day || '').trim();
+    const bmeta = await store.getJSON('backup:' + day + ':meta');
+    if (!bmeta) return json({ error: 'No backup found for ' + day }, 404);
+    // wipe current shards, copy the snapshot back, bump gen so open tabs can't re-save stale data
+    const cur = await store.getJSON('meta');
+    const curShards = (cur && Array.isArray(cur.shards)) ? cur.shards : [];
+    for (const mk of curShards) { try { await store.del('bills:' + mk); } catch {} }
+    const shards = Array.isArray(bmeta.shards) ? bmeta.shards : [];
+    let bills = 0;
+    for (const mk of shards) {
+      const c = await store.getJSON('backup:' + day + ':bills:' + mk);
+      if (c) { await store.setJSON('bills:' + mk, c); bills += c.length; }
+    }
+    bmeta.gen = Date.now();
+    await store.setJSON('meta', bmeta);
+    return json({ ok: true, restored: day, bills, gen: bmeta.gen });
+  }
+
   // --- USPS tracking (admin) ---
   if (action === 'uspsStatus') {
     return json({ configured: uspsReady(env), emailConfigured: !!(env.RESEND_API_KEY && env.ALERT_EMAIL) });
@@ -469,9 +530,13 @@ export default {
     }
     return res;
   },
-  // Cron trigger (see wrangler.toml [triggers]): poll USPS for in-transit checks.
+  // Cron triggers (see wrangler.toml [triggers]): 3-hourly USPS polling + nightly backup.
   async scheduled(event, env, ctx) {
     const store = makeStore(env.AP_HUB);
-    ctx.waitUntil(runTracking(env, store, 40).catch((e) => console.error('tracking cron failed', e)));
+    if (event.cron === '47 8 * * *') {
+      ctx.waitUntil(runBackup(env, store).catch((e) => console.error('backup cron failed', e)));
+    } else {
+      ctx.waitUntil(runTracking(env, store, 40).catch((e) => console.error('tracking cron failed', e)));
+    }
   },
 };
