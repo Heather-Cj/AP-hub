@@ -104,7 +104,7 @@ button{font-family:inherit; cursor:pointer; border:none; background:none}
 .btn-danger:hover{filter:brightness(.97)}
 .btn-sm{padding:6px 10px;font-size:12px;border-radius:7px}
 
-.view{padding:24px 26px 60px;max-width:1320px;width:100%}
+.view{padding:24px 26px 60px;width:100%}
 
 /* ---------- generic blocks ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--sh-sm)}
@@ -489,7 +489,7 @@ const printedCount=()=>BILLS.filter(b=>((b.isChase||b.payType==='check'||b.payTy
 /* group chase checks awaiting deposit into per-store batches of 8; returns label for one check */
 function depositBatchLabel(ch){const peers=BILLS.filter(b=>b.isChase&&b.chaseStage==='deposit'&&b.account===ch.account).sort((a,b)=>((a.printed&&a.printed.date)||'').localeCompare((b.printed&&b.printed.date)||'')||a.id-b.id);const i=peers.findIndex(b=>b.id===ch.id);return ch.account+'-'+(Math.floor(Math.max(i,0)/CHECK_BATCH)+1);}
 /* generic row sorter driven by App.state.sortKey / sortDir */
-function sortVal(b,key){switch(key){case 'id':return b.id;case 'amount':return +b.amount||0;case 'vendor':return (b.vendor||'').toLowerCase();case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'method':return (b.method||'').toLowerCase();case 'due':return b.due||'';case 'invdate':return b.invoiceDate||'';case 'received':return b.receivedDate||'';case 'printed':return (b.printed&&b.printed.date)||'';case 'date':return (b.paid&&b.paid.date)||(b.printed&&b.printed.date)||'';case 'check':return b.checkNumber||(b.isChase&&b.tracking)||'';case 'status':return (b.isChase?b.chaseStage:b.payType==='check'?b.checkStage:b.stage)||'';default:return b.id;}}
+function sortVal(b,key){switch(key){case 'id':return b.id;case 'amount':return +b.amount||0;case 'vendor':return (b.vendor||'').toLowerCase();case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'method':return (b.method||'').toLowerCase();case 'due':return b.due||'';case 'invdate':return b.invoiceDate||'';case 'received':return b.receivedDate||'';case 'comment':return (b.comments||'').toLowerCase();case 'created':return b.createdAt||0;case 'modified':return b.modifiedAt||0;case 'printed':return (b.printed&&b.printed.date)||'';case 'date':return (b.paid&&b.paid.date)||(b.printed&&b.printed.date)||'';case 'check':return b.checkNumber||(b.isChase&&b.tracking)||'';case 'status':return (b.isChase?b.chaseStage:b.payType==='check'?b.checkStage:b.stage)||'';default:return b.id;}}
 function sortBy(rows,key,dir){const s=dir==='desc'?-1:1;return rows.slice().sort((a,b)=>{const x=sortVal(a,key),y=sortVal(b,key);if(x<y)return -1*s;if(x>y)return 1*s;return (a.id-b.id)*s;});}
 /* multi-key sort by a stack of {key,dir} */
 function multiSortRows(rows,stack){if(!stack||!stack.length)return rows.slice();return rows.slice().sort((a,b)=>{for(const {key,dir} of stack){const s=dir==='desc'?-1:1;const x=sortVal(a,key),y=sortVal(b,key);if(x<y)return -1*s;if(x>y)return 1*s;}return a.id-b.id;});}
@@ -630,7 +630,7 @@ const App={
   /* central activity logger (real timestamp) */
   log(act,obj){ AUDIT.unshift({who:CURRENT?CURRENT.name:'System',act,obj:obj||'',at:Date.now()}); if(AUDIT.length>600)AUDIT.length=600; },
   /* log a bill action to BOTH the global activity feed and the item's own history */
-  logBill(b,act,detail){ this.log(b?act+' #'+b.id:act,detail); if(b){ (b.history=b.history||[]).push({at:Date.now(),who:CURRENT?CURRENT.name:'System',initials:CURRENT?CURRENT.initials:'',act,detail:detail||''}); if(b.history.length>250)b.history.shift(); } },
+  logBill(b,act,detail){ this.log(b?act+' #'+b.id:act,detail); if(b){ b.modifiedAt=Date.now(); (b.history=b.history||[]).push({at:Date.now(),who:CURRENT?CURRENT.name:'System',initials:CURRENT?CURRENT.initials:'',act,detail:detail||''}); if(b.history.length>250)b.history.shift(); } },
   /* MM/DD/YYYY date input helpers */
   fmtDateInput(el){let v=(el.value||'').replace(/\D/g,'').slice(0,8);let out=v;if(v.length>=5)out=v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);else if(v.length>=3)out=v.slice(0,2)+'/'+v.slice(2);el.value=out;},
   syncDate(id,iso){const e=document.getElementById(id);if(e)e.value=isoToMDY(iso);},
@@ -926,13 +926,13 @@ const App={
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${total} bill${total!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="bills">${svg(ICN.bills,14)} Export Excel</button>`:''}${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div>
     </div>
     <div class="card"><div class="tablewrap"><table>
-      <thead><tr>${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('received','Received')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th>${this.sortHdr('id','ID')}</tr></thead>
+      <thead><tr>${this.sortHdr('received','Received')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('comment','Comment')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th>${this.sortHdr('id','ID')}${this.sortHdr('created','Created')}${this.sortHdr('modified','Modified')}</tr></thead>
       <tbody>${shown.length?shown.map(b=>`<tr class="click" data-bill="${b.id}">
-        <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account}</span></td>
-        <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
-        <td class="mono">${invOf(b)}</td>
-        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.receivedDate?fmtD(b.receivedDate):'—'}${b.receivedEdited?' <span class="badge b-amber" style="font-size:8px;padding:0 4px">e</span>':''}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</td>
+        <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span class="clickacct" data-acct-set="${b.account}" style="cursor:pointer">${b.account?'#'+b.account:(b.gl||'—')}</span></div></div></td>
+        <td class="mono">${invOf(b)}</td>
+        <td style="max-width:210px;font-size:12px;color:var(--ink-2)"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(b.comments||'').replace(/"/g,'&quot;')}">${b.comments?String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;'):'—'}</div></td>
         <td class="r mono" style="font-weight:600">${money(b.amount)}</td>
         <td style="font-size:12.5px">${b.method||(()=>{const vd=vendor(b.vendor);return vd&&vd.m?`<span style="color:var(--ink-3)">${vd.m==='To be Picked Up'?'Pickup':vd.m} <span style="font-size:10px">· default</span></span>`:'<span style="color:var(--ink-3)">— set by AP</span>';})()}${(b.paidViaChase||b.chaseFlag)?' <span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':''}</td>
         <td>${statusBadge(b)}</td>
@@ -940,9 +940,11 @@ const App={
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.printed?fmtD(b.printed.date):'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):'—')}</td>
-        <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||'—'}</td>
+        <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||b.enteredInitials||'—'}</td>
         <td class="mono" style="font-weight:700">#${b.id}${b.link?` <a href="${b.link}" target="_blank" rel="noopener" title="View bill" onclick="event.stopPropagation()" style="color:var(--blue)">${svg(ICN.arrow,12)}</a>`:''}</td>
-      </tr>`).join(''):`<tr><td colspan="14"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
+        <td class="mono" style="font-size:11px;color:var(--ink-3);white-space:nowrap">${b.createdAt?fmtDT(b.createdAt):(b.receivedDate?fmtD(b.receivedDate):'—')}</td>
+        <td class="mono" style="font-size:11px;color:var(--ink-3);white-space:nowrap">${b.modifiedAt?fmtDT(b.modifiedAt):'—'}</td>
+      </tr>`).join(''):`<tr><td colspan="16"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
     </table></div>${more>0?`<div style="padding:12px 16px;text-align:center;border-top:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" data-more="bill">Show ${Math.min(150,more)} more · ${more} hidden</button> <span style="font-size:12px;color:var(--ink-3);margin-left:8px">Tip: use search or filters to narrow down</span></div>`:''}</div>`;
   },
 
@@ -1600,7 +1602,7 @@ const App={
     if(dup&&!confirm('Possible duplicate — bill #'+dup.id+' for '+v.n+' ('+dup.account+' · '+(dup.inv||'no invoice #')+' · '+money(dup.amount)+') already exists.\n\nEnter this bill anyway?'))return;
     const comments=(g('f_memo')?g('f_memo').value:'').trim();
     const recvISO=(g('f_recv')?mdyToISO(g('f_recv').value):'')||todayISO;
-    const b={id:nextId++,vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,chaseFlag,link,comments,receivedDate:recvISO,receivedEdited:recvISO!==todayISO,
+    const b={id:nextId++,createdAt:Date.now(),modifiedAt:Date.now(),vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,chaseFlag,link,comments,receivedDate:recvISO,receivedEdited:recvISO!==todayISO,
       method:null,tracking:'',payType:null,enteredBy:CURRENT.u,enteredInitials:CURRENT.initials,
       reqApproval:{required:approq,approver},
       stage:'submission',approval:null,paid:null,pickedUp:null,sync:'synced'};
@@ -1863,7 +1865,7 @@ const App={
     const editDel=(canEdit('bills')?`<button class="btn btn-ghost" onclick="App.closeDrawer();App.openEditBill(${b.id})">${svg(ICN.edit,14)} Edit</button>`:'')+(canDelete()?`<button class="btn btn-ghost" style="color:var(--red)" onclick="App.deleteBill(${b.id})">${svg(ICN.trash,14)} Delete</button>`:'');
     const sb=(b.stage==='ready'&&b.due)?sendByISO(b.due):'';
     const hist=(b.history||[]).slice().reverse();
-    const histHtml=hist.length?`<div class="card-h" style="border-top:1px solid var(--line-2);margin-top:8px;padding:12px 0 4px"><h3 style="font-size:13px">History</h3><span class="sub">${hist.length} event${hist.length!==1?'s':''}</span></div>
+    const histHtml=hist.length?`<div class="card-h" style="border-top:1px solid var(--line-2);margin-top:8px;padding:12px 0 4px"><h3 style="font-size:13px">Audit trail</h3><span class="sub">who did what, when · ${hist.length} event${hist.length!==1?'s':''}</span></div>
       <div style="display:flex;flex-direction:column">${hist.map(h=>`<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line-2)"><div class="avatar" style="width:24px;height:24px;font-size:9px;flex-shrink:0">${h.initials||'—'}</div><div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;color:var(--ink-1)">${h.act}${h.detail?` <span style="font-weight:400;color:var(--ink-3)">— ${h.detail}</span>`:''}</div><div style="font-size:11px;color:var(--ink-3)">${h.who} · ${fmtDT(h.at)}</div></div></div>`).join('')}</div>`:'';
     this.openDrawerEl(`
       <div class="dr-head"><div class="vlogo" style="width:42px;height:42px;border-radius:11px">${abbr(b.vendor)}</div><div><div style="font-weight:700;font-size:15px">${b.vendor}</div><div style="font-size:12.5px;color:var(--ink-3)">Bill #${b.id}${b.inv?(" · "+b.inv):""}</div></div><button class="x" data-close>${svg(ICN.x,16)}</button></div>
@@ -1891,6 +1893,8 @@ const App={
           ${b.paid?`<dt>Payment date</dt><dd class="mono">${fmtD(b.paid.date)}</dd><dt>Paid by</dt><dd>${b.paid.initials}</dd>`:''}
           ${b.chaseRef?`<dt>Chase check</dt><dd><span onclick="App.openBill(${b.chaseRef})" style="cursor:pointer;color:var(--blue);font-weight:600">Chase ${b.account} · #${b.chaseRef} ${svg(ICN.arrow,12)}</span></dd>`:''}
           <dt>Entered by</dt><dd>${b.enteredInitials}</dd>
+          ${b.createdAt?`<dt>Created</dt><dd class="mono">${fmtDT(b.createdAt)}</dd>`:''}
+          ${b.modifiedAt?`<dt>Last modified</dt><dd class="mono">${fmtDT(b.modifiedAt)}</dd>`:''}
         </dl>
         ${b.comments?`<div style="margin-top:6px"><div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Memo / notes</div><div style="font-size:13px;color:var(--ink-1);white-space:pre-wrap;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px">${String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`:''}
         ${(()=>{const cs=(b.commentThread||[]).slice().sort((x,y)=>(y.at||0)-(x.at||0));return `<div style="margin-top:16px"><div class="card-h" style="padding:0 0 8px"><h3 style="font-size:13px">Comments</h3><span class="sub">${cs.length||''}</span></div>
