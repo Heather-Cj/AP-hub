@@ -1048,13 +1048,22 @@ const App={
     const processing=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='cut');
     const ready=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup');
     const done=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickedup');
+    // queue: open bills whose method (explicit, or the vendor's default) is To be Picked Up
+    const isPickupMethod=b=>{if(b.method)return b.method==='To be Picked Up';const vd=vendor(b.vendor);return !!(vd&&vd.m==='To be Picked Up');};
+    const upcoming=BILLS.filter(b=>!b.isChase&&!b.payType&&billUnpaid(b)&&isPickupMethod(b));
     const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
-    const tab=this.state.pickTab||'ready';
-    const tabs=[['ready','Ready for pickup',ready.length],['prep','Being prepared',processing.length],['done','Picked up',done.length]];
+    const tab=this.state.pickTab||(ready.length?'ready':(upcoming.length?'upcoming':'ready'));
+    const tabs=[['upcoming','To be picked up',upcoming.length],['ready','Ready for pickup',ready.length],['prep','Being prepared',processing.length],['done','Picked up',done.length]];
     const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-picktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}</div>`;
     const vf={id:b=>b.id,vendor:b=>(b.vendor||'').toLowerCase(),account:b=>b.account||'',amount:b=>+b.amount||0,check:b=>b.checkNumber||''};
     let body='';
-    if(tab==='ready'){
+    if(tab==='upcoming'){
+      const vfU={...vf,inv:b=>(b.inv||'').toLowerCase(),due:b=>b.due||''};
+      const rows=this.gsortRows('pkU',upcoming,vfU,'due');
+      body=`<div class="card"><div class="card-h"><h3>To be picked up</h3><span class="sub">open bills where the method (or vendor default) is pickup · ${money(sum(upcoming))} · ${upcoming.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${this.gh('pkU','account','Account')}${this.gh('pkU','vendor','Vendor')}${this.gh('pkU','inv','Invoice #')}${this.gh('pkU','amount','Amount','r')}<th>Method</th>${this.gh('pkU','due','Due')}<th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>{const explicit=b.method==='To be Picked Up';return `<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div></td><td class="mono" style="font-size:12px">${invOf(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td style="font-size:12px">Pickup${explicit?'':' <span style="font-size:10px;color:var(--ink-3)">· default</span>'}</td><td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td><td class="r">${(b.stage==='ready'&&can('record'))?`<button class="btn btn-gold btn-sm" data-record="${b.id}">${svg(ICN.dollar,13)} Pay Bill</button>`:statusBadge(b)}</td></tr>`;}).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>No open pickup bills. Bills whose method (or vendor default) is “To be Picked Up” queue here until the check is printed.</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else if(tab==='ready'){
       const rows=this.gsortRows('pkR',ready,vf,'id');
       body=`<div class="card"><div class="card-h"><h3>Ready for pickup</h3><span class="sub">${ready.length} waiting · ${money(sum(ready))}</span></div>
       <div class="tablewrap"><table><thead><tr>${this.gh('pkR','id','ID')}${this.gh('pkR','account','Account')}${this.gh('pkR','vendor','Vendor')}${this.gh('pkR','amount','Amount','r')}${this.gh('pkR','check','Check #')}<th>Cut by</th><th class="r"></th></tr></thead>
@@ -1152,7 +1161,8 @@ const App={
     const tsort=arr=>arr.slice().sort((a,b)=>{const x=tval(a),y=tval(b);if(x<y)return -1*tdir;if(x>y)return 1*tdir;return (a.id-b.id)*tdir;});
     const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
     const pickReady=BILLS.filter(b=>b.payType==='pickup'&&b.checkStage==='pickup');
-    const tabs=[['send','To be sent out',toSend.length],['transit','On the way',transit.length],['delivered','Delivered',delivered.length],['pickups','Pickups',pickReady.length]];
+    const pickQueue=BILLS.filter(b=>{if(b.isChase||b.payType||!billUnpaid(b))return false;if(b.method)return b.method==='To be Picked Up';const vd=vendor(b.vendor);return !!(vd&&vd.m==='To be Picked Up');});
+    const tabs=[['send','To be sent out',toSend.length],['transit','On the way',transit.length],['delivered','Delivered',delivered.length],['pickups','Pickups',pickReady.length+pickQueue.length]];
     const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-tracktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}${(can('record')||can('create'))?`<div style="margin-left:auto"><input type="file" id="uspsfile" accept="application/pdf" style="display:none" onchange="App.importUspsPdf(this.files[0])"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('uspsfile').value='';document.getElementById('uspsfile').click()">${svg(ICN.truck,14)} Import USPS PDF</button></div>`:''}</div>`;
     if(tab==='pickups')return tabBar+this.v_pickups();
     let body='';
