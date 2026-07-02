@@ -310,7 +310,7 @@ th.r,td.r{text-align:right}
 <script>
 const $=(s,r=document)=>r.querySelector(s);
 const money=n=>'$'+Math.abs(Number(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const todayISO='2026-06-24';
+const todayISO=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
 const fmtD=d=>{if(!d)return '—';const t=new Date(d+'T00:00');if(isNaN(t))return '—';const mm=String(t.getMonth()+1).padStart(2,'0'),dd=String(t.getDate()).padStart(2,'0');return mm+'/'+dd+'/'+t.getFullYear();};
 const fmtDT=ms=>{if(!ms)return '';const d=new Date(ms);if(isNaN(d))return '';return String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'/'+d.getFullYear()+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});};
 /* MM/DD/YYYY text date inputs (browser-locale-proof) */
