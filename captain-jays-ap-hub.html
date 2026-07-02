@@ -708,6 +708,33 @@ const App={
     else{if(s.sortStack.length===1&&i===0)s.sortStack[0].dir=s.sortStack[0].dir==='asc'?'desc':'asc';else s.sortStack=[{key:k,dir:'asc'}];}
     s.sortKey=s.sortStack[0].key;s.sortDir=s.sortStack[0].dir;this.render();},
   clearSort(){this.state.sortStack=[];this.render();},
+  sortColumns(){return [['received','Received'],['invdate','Invoice date'],['vendor','Vendor'],['inv','Invoice #'],['comment','Comment'],['amount','Amount'],['method','Method'],['status','Status'],['check','Check #'],['printed','Printed'],['due','Due date'],['date','Paid'],['id','ID'],['created','Created'],['modified','Modified']];},
+  openSortDialog(){this.sortDraft=(this.state.sortStack&&this.state.sortStack.length)?this.state.sortStack.map(x=>({...x})):[{key:'received',dir:'asc'}];this.renderSortDialog();},
+  closeSortDialog(){const m=document.getElementById('sortmodal');if(m)m.remove();},
+  addSortLevel(){const used=new Set(this.sortDraft.map(x=>x.key));const next=(this.sortColumns().find(([k])=>!used.has(k))||['amount'])[0];this.sortDraft.push({key:next,dir:'asc'});this.renderSortDialog();},
+  delSortLevel(i){this.sortDraft.splice(i,1);if(!this.sortDraft.length)this.sortDraft.push({key:'received',dir:'asc'});this.renderSortDialog();},
+  setLevelKey(i,k){if(this.sortDraft[i])this.sortDraft[i].key=k;},
+  setLevelDir(i,d){if(this.sortDraft[i])this.sortDraft[i].dir=d;},
+  moveSortLevel(i,dir){const j=i+dir;if(j<0||j>=this.sortDraft.length)return;const t=this.sortDraft[i];this.sortDraft[i]=this.sortDraft[j];this.sortDraft[j]=t;this.renderSortDialog();},
+  applySortDialog(){this.state.sortStack=this.sortDraft.map(x=>({...x}));this.closeSortDialog();this.render();},
+  renderSortDialog(){const cols=this.sortColumns();
+    const rows=this.sortDraft.map((lv,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--ink-3);width:52px;flex-shrink:0">${i===0?'Sort by':'then by'}</span>
+      <select class="selent" onchange="App.setLevelKey(${i},this.value)" style="flex:1">${cols.map(([k,l])=>`<option value="${k}" ${lv.key===k?'selected':''}>${l}</option>`).join('')}</select>
+      <select class="selent" onchange="App.setLevelDir(${i},this.value)" style="width:150px"><option value="asc" ${lv.dir==='asc'?'selected':''}>Ascending</option><option value="desc" ${lv.dir==='desc'?'selected':''}>Descending</option></select>
+      <button class="btn btn-ghost btn-sm" title="Move up" onclick="App.moveSortLevel(${i},-1)" ${i===0?'disabled style="opacity:.3"':''}>↑</button>
+      <button class="btn btn-ghost btn-sm" title="Move down" onclick="App.moveSortLevel(${i},1)" ${i===this.sortDraft.length-1?'disabled style="opacity:.3"':''}>↓</button>
+      <button class="btn btn-ghost btn-sm" title="Delete level" onclick="App.delSortLevel(${i})">${svg(ICN.trash,13)}</button>
+    </div>`).join('');
+    const html=`<div id="sortmodal" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:grid;place-items:center" onclick="if(event.target===this)App.closeSortDialog()">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px 24px;width:600px;max-width:94vw;box-shadow:0 30px 90px rgba(0,0,0,.4)">
+        <div style="display:flex;align-items:center;margin-bottom:16px"><h3 style="font-size:16px;font-weight:700">Custom sort</h3><button class="x" onclick="App.closeSortDialog()" style="margin-left:auto">${svg(ICN.x,16)}</button></div>
+        <div style="display:flex;gap:16px;font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;margin:0 0 6px 60px"><span style="flex:1">Column</span><span style="width:150px">Order</span><span style="width:130px"></span></div>
+        ${rows}
+        <div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="App.addSortLevel()">${svg(ICN.plus,13)} Add level</button><button class="btn btn-ghost btn-sm" onclick="App.clearSort();App.closeSortDialog()">Clear all</button></div>
+        <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end"><button class="btn btn-ghost" onclick="App.closeSortDialog()">Cancel</button><button class="btn btn-gold" onclick="App.applySortDialog()">${svg(ICN.check,14)} Apply sort</button></div>
+      </div></div>`;
+    this.closeSortDialog();document.body.insertAdjacentHTML('beforeend',html);},
   sortHdr(key,label,cls){const st=this.state.sortStack||[];const i=st.findIndex(x=>x.key===key);const on=i>=0;const ar=on?(st[i].dir==='asc'?' ▲':' ▼'):'';const num=(on&&st.length>1)?`<sup style="font-size:9px;color:var(--gold);font-weight:700">${i+1}</sup>`:'';return `<th class="${cls||''}" data-sort="${key}" title="Click to sort · Shift-click to add a sort level" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${ar}${num}</th>`;},
   applySort(rows){const st=this.state.sortStack;if(st&&st.length)return multiSortRows(rows,st);return sortBy(rows,this.state.sortKey,this.state.sortDir);},
   monthsList(){const set={};BILLS.forEach(b=>{const mk=monthKey(b.receivedDate);if(mk)set[mk]=1;});set[monthKey(todayISO)]=1;return Object.keys(set).sort().reverse();},
@@ -747,7 +774,7 @@ const App={
       <input type="date" class="selent" data-recvfrom value="${s.recvFrom||''}" style="padding:5px 8px" title="Received from">
       <span style="font-size:11px;color:var(--ink-3)">–</span>
       <input type="date" class="selent" data-recvto value="${s.recvTo||''}" style="padding:5px 8px" title="Received to">
-      ${st.length>1?`<span style="font-size:11px;color:var(--ink-3);margin-left:6px">Sorted by ${st.length} cols</span><button class="btn btn-ghost btn-sm" data-clearsort>clear sort</button>`:'<span style="font-size:11px;color:var(--ink-3);margin-left:6px">tip: Shift-click headers to sort by several columns</span>'}
+      <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="App.openSortDialog()">↕ Custom sort${st.length?` (${st.length})`:''}</button>${st.length?`<button class="btn btn-ghost btn-sm" data-clearsort>clear</button>`:'<span style="font-size:11px;color:var(--ink-3)">or Shift-click headers</span>'}
     </div>`:'';
     return `<select class="selent" data-acct>${acctOpts}</select><select class="selent" data-method>${methodOpts}</select>${statusSel}<select class="selent" data-month>${monthOpts}</select>${quickBar}`;},
   exportXlsx(rows,name){
