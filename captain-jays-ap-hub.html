@@ -705,8 +705,9 @@ const App={
     if(s.acct!=='all'&&b.account!==s.acct)return false;
     if(s.method!=='all'&&(b.method||'')!==s.method)return false;
     if(s.month!=='all'&&monthKey(b.receivedDate)!==s.month)return false;
-    if(q){const qn=q.replace(/[\s-]/g,'');const v=vendor(b.vendor);const acctHit=v&&v.accounts&&Object.values(v.accounts).some(no=>{const s=String(no).toLowerCase();return s.includes(q)||s.replace(/[\s-]/g,'').includes(qn);});
-      if(!(String(b.id).includes(q)||(b.vendor||'').toLowerCase().includes(q)||(b.inv||'').toLowerCase().includes(q)||(b.account||'').toLowerCase().includes(q)||String(b.checkNumber||'').toLowerCase().includes(q)||acctHit))return false;}
+    if(q){const qn=q.replace(/[\s-]/g,'');const strip=x=>String(x||'').toLowerCase().replace(/[\s-]/g,'');const v=vendor(b.vendor);const acctHit=v&&v.accounts&&Object.values(v.accounts).some(no=>{const s=String(no).toLowerCase();return s.includes(q)||strip(no).includes(qn);});
+      const hit=String(b.id).includes(q)||String(b.id).includes(qn)||(b.vendor||'').toLowerCase().includes(q)||strip(b.vendor).includes(qn)||(b.inv||'').toLowerCase().includes(q)||strip(b.inv).includes(qn)||(b.account||'').toLowerCase().includes(q)||strip(b.account).includes(qn)||String(b.checkNumber||'').toLowerCase().includes(q)||strip(b.checkNumber).includes(qn)||acctHit;
+      if(!hit)return false;}
     return true;},
   filterControls(withStatus){const s=this.state;
     const acctOpts=['<option value="all">All accounts</option>',...ACCOUNTS.map(a=>`<option ${s.acct===a.code?'selected':''} value="${a.code}">${a.code}</option>`)].join('');
@@ -900,9 +901,8 @@ const App={
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${total} bill${total!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="bills">${svg(ICN.bills,14)} Export Excel</button>`:''}${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div>
     </div>
     <div class="card"><div class="tablewrap"><table>
-      <thead><tr>${this.sortHdr('id','ID')}${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th></tr></thead>
+      <thead><tr>${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th>${this.sortHdr('id','ID')}</tr></thead>
       <tbody>${shown.length?shown.map(b=>`<tr class="click" data-bill="${b.id}">
-        <td class="mono" style="font-weight:700">#${b.id}${b.link?` <a href="${b.link}" target="_blank" rel="noopener" title="View bill" onclick="event.stopPropagation()" style="color:var(--blue)">${svg(ICN.arrow,12)}</a>`:''}</td>
         <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account}</span></td>
         <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
         <td class="mono">${invOf(b)}</td>
@@ -915,6 +915,7 @@ const App={
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.due?fmtD(b.due):'—'}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):'—')}</td>
         <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||'—'}</td>
+        <td class="mono" style="font-weight:700">#${b.id}${b.link?` <a href="${b.link}" target="_blank" rel="noopener" title="View bill" onclick="event.stopPropagation()" style="color:var(--blue)">${svg(ICN.arrow,12)}</a>`:''}</td>
       </tr>`).join(''):`<tr><td colspan="13"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
     </table></div>${more>0?`<div style="padding:12px 16px;text-align:center;border-top:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" data-more="bill">Show ${Math.min(150,more)} more · ${more} hidden</button> <span style="font-size:12px;color:var(--ink-3);margin-left:8px">Tip: use search or filters to narrow down</span></div>`:''}</div>`;
   },
@@ -1015,11 +1016,14 @@ const App={
   v_checks(){
     let tab=this.state.checkTab||'cut';if(tab==='send')tab='cut';
     const toPrint=BILLS.filter(b=>b.isChase&&b.chaseStage==='print');
-    const toCut=[...BILLS.filter(b=>b.isChase&&b.chaseStage==='cut'),...BILLS.filter(b=>(b.payType==='check'||b.payType==='pickup')&&b.checkStage==='cut')];
+    const toCut=BILLS.filter(b=>!b.isChase&&(b.payType==='check'||b.payType==='pickup')&&b.checkStage==='cut');
+    const toCutChase=BILLS.filter(b=>b.isChase&&b.chaseStage==='cut');
     const toSend=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&b.checkStage==='send');
     const toDep=BILLS.filter(b=>b.isChase&&b.chaseStage==='deposit');
     const sum=a=>a.reduce((s,b)=>s+(+b.amount||0),0);
-    const tabs=[['cut','To Cut',toCut.length],['print','To Print · Chase',toPrint.length],['deposit','To Deposit · Chase',toDep.length]];
+    // Regular checks (To Cut) are a separate process from Chase. Chase has its own
+    // print → cut → deposit pipeline, grouped in the "· Chase" tabs.
+    const tabs=[['cut','To Cut',toCut.length],['print','To Print · Chase',toPrint.length],['cutchase','To Cut · Chase',toCutChase.length],['deposit','To Deposit · Chase',toDep.length]];
     const tabBar=`<div class="filters" style="gap:8px;flex-wrap:wrap">${tabs.map(([k,l,n])=>`<button class="btn ${tab===k?'btn-gold':'btn-ghost'} btn-sm" data-checktab="${k}">${l}${n?` <span style="opacity:.7">(${n})</span>`:''}</button>`).join('')}<div style="margin-left:auto;font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px">${svg(ICN.bolt,12)} One step per click · batches of ${CHECK_BATCH}</div></div>`;
     const nameCell=b=>b.isChase?`<div class="vendorcell"><div class="vlogo" style="background:#efe9fb;color:#7c3aed">CH</div><div class="vmeta"><b>Chase · ${b.account}</b><span>${b.connected.length} bill${b.connected.length!==1?'s':''}</span></div></div>`:`<div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${invOf(b)}</span></div></div>`;
     let body='';
@@ -1033,15 +1037,15 @@ const App={
       <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td style="font-size:12px">${b.isChase?'<span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':b.method}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-print="${b.id}">${svg(ICN.check,13)} Print check</button>`:''}</td></tr>`).join(''):`<tr><td colspan="5"><div class="empty">${svg(ICN.check,30)}<div>No Chase checks to print. Regular checks are printed from <b>Pay Bill</b> and arrive in To Cut.</div></div></td></tr>`}</tbody></table></div></div>`;
     } else if(tab==='cut'){
       const tkey=this.state.tSort||'vendor',tdir=this.state.tDir==='desc'?-1:1;
-      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'check':return b.checkNumber||'';case 'batch':return (b.printed&&b.printed.batch)||0;case 'printedby':return ((b.printed&&b.printed.initials)||'').toLowerCase();default:return (b.vendor||'').toLowerCase();}};
+      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'check':return b.checkNumber||'';case 'batch':return (b.printed&&b.printed.batch)||0;case 'printedby':return ((b.printed&&b.printed.initials)||'').toLowerCase();default:return (b.vendor||'').toLowerCase();}};
       const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
       const rows=toCut.slice().sort((a,b)=>{const x=tval(a),y=tval(b);return (x<y?-1:x>y?1:a.id-b.id)*tdir;});
       body=`<div class="card"><div class="card-h"><h3>Checks to be Cut</h3><span class="sub">${money(sum(toCut))} · ${toCut.length}</span></div>
-      <div class="tablewrap"><table><thead><tr>${th('account','Account')}${th('vendor','Type')}${th('amount','Amount','r')}${th('check','Check #')}${th('batch','Batch')}${th('printedby','Printed by')}<th class="r"></th></tr></thead>
-      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}${b.payType==='pickup'?' <span class="badge b-amber" style="font-size:9px;padding:1px 6px">PICKUP</span>':''}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td style="font-size:12px">${b.printed?b.printed.initials+' · '+fmtD(b.printed.date):'—'}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-cut="${b.id}">${svg(ICN.check,13)} Mark Cut</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.check,30)}<div>Nothing waiting to cut.</div></div></td></tr>`}</tbody></table></div></div>`;
+      <div class="tablewrap"><table><thead><tr>${th('account','Account')}${th('vendor','Vendor')}${th('inv','Invoice #')}${th('amount','Amount','r')}${th('check','Check #')}${th('batch','Batch')}${th('printedby','Printed by')}<th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}${b.payType==='pickup'?' <span class="badge b-amber" style="font-size:9px;padding:1px 6px">PICKUP</span>':''}</td><td class="mono" style="font-size:12px">${invOf(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td style="font-size:12px">${b.printed?b.printed.initials+' · '+fmtD(b.printed.date):'—'}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-cut="${b.id}">${svg(ICN.check,13)} Mark Cut</button>`:''}</td></tr>`).join(''):`<tr><td colspan="8"><div class="empty">${svg(ICN.check,30)}<div>Nothing waiting to cut.</div></div></td></tr>`}</tbody></table></div></div>`;
     } else if(tab==='send'){
       const tkey=this.state.tSort||'vendor',tdir=this.state.tDir==='desc'?-1:1;
-      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'check':return b.checkNumber||'';case 'cutby':return ((b.cut&&b.cut.initials)||'').toLowerCase();default:return (b.vendor||'').toLowerCase();}};
+      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'check':return b.checkNumber||'';case 'cutby':return ((b.cut&&b.cut.initials)||'').toLowerCase();default:return (b.vendor||'').toLowerCase();}};
       const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
       const rows=toSend.slice().sort((a,b)=>{const x=tval(a),y=tval(b);return (x<y?-1:x>y?1:a.id-b.id)*tdir;});
       const rproc=BILLS.filter(b=>!b.isChase&&b.payType==='check'&&(b.checkStage==='print'||b.checkStage==='cut'));
@@ -1050,8 +1054,16 @@ const App={
       body=`${readiness.length?`<div class="card" style="margin-bottom:18px"><div class="card-h"><h3>Vendor readiness</h3><span class="sub">hold a vendor until all its checks are ready to send</span></div>
         <div style="padding:12px 18px;display:flex;flex-direction:column;gap:6px">${readiness.map(([vn,v])=>{const total=v.ready+v.proc;const done=v.ready===total;return `<div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-2)"><div class="vlogo" style="width:24px;height:24px;font-size:9px">${abbr(vn)}</div><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${vn}</b></span><span class="badge ${done?'b-green':'b-amber'}" style="font-size:9px;padding:1px 7px">${v.ready}/${total} ready to send</span></div>`;}).join('')}</div></div>`:''}
       <div class="card"><div class="card-h"><h3>To Send</h3><span class="sub">${money(sum(toSend))} · ${toSend.length}</span></div>
-      <div class="tablewrap"><table><thead><tr>${th('account','Account')}${th('vendor','Vendor')}${th('amount','Amount','r')}${th('check','Check #')}${th('cutby','Cut by')}<th class="r"></th></tr></thead>
-      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Send</button>`:''}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to send. Cut checks land here (also in Tracking).</div></div></td></tr>`}</tbody></table></div></div>`;
+      <div class="tablewrap"><table><thead><tr>${th('account','Account')}${th('vendor','Vendor')}${th('inv','Invoice #')}${th('amount','Amount','r')}${th('check','Check #')}${th('cutby','Cut by')}<th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}</td><td class="mono" style="font-size:12px">${invOf(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||'—'}</td><td style="font-size:12px">${b.cut?b.cut.initials+' · '+fmtD(b.cut.date):'—'}</td><td class="r">${(can('record')||can('send'))?`<button class="btn btn-gold btn-sm" data-send="${b.id}">${svg(ICN.truck,13)} Send</button>`:''}</td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${svg(ICN.truck,30)}<div>Nothing ready to send. Cut checks land here (also in Tracking).</div></div></td></tr>`}</tbody></table></div></div>`;
+    } else if(tab==='cutchase'){
+      const tkey=this.state.tSort||'account',tdir=this.state.tDir==='desc'?-1:1;
+      const tval=b=>{switch(tkey){case 'amount':return +b.amount||0;case 'check':return b.checkNumber||b.tracking||'';case 'batch':return (b.printed&&b.printed.batch)||0;default:return b.account||'';}};
+      const th=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.tsort('${k}')">${l}${tkey===k?(tdir===1?' ▲':' ▼'):''}</th>`;
+      const rows=toCutChase.slice().sort((a,b)=>{const x=tval(a),y=tval(b);return (x<y?-1:x>y?1:a.id-b.id)*tdir;});
+      body=`<div class="card"><div class="card-h"><h3>Chase checks to Cut</h3><span class="sub">${money(sum(toCutChase))} · ${toCutChase.length}</span></div>
+      <div class="tablewrap"><table><thead><tr>${th('account','Account')}<th>Type</th>${th('amount','Amount','r')}${th('check','Check #')}${th('batch','Batch')}<th class="r"></th></tr></thead>
+      <tbody>${rows.length?rows.map(b=>`<tr class="click" data-bill="${b.id}"><td><span class="entity-chip"><span class="pin"></span>${b.account}</span></td><td>${nameCell(b)}</td><td class="r mono" style="font-weight:700">${money(b.amount)}</td><td class="mono" style="font-size:12px">${b.checkNumber||b.tracking||'—'}</td><td class="mono" style="font-size:12px">${b.printed&&b.printed.batch?'#'+b.printed.batch:'—'}</td><td class="r">${can('record')?`<button class="btn btn-gold btn-sm" data-cut="${b.id}">${svg(ICN.check,13)} Mark Cut</button>`:''}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty">${svg(ICN.check,30)}<div>No Chase checks to cut. They arrive here once printed.</div></div></td></tr>`}</tbody></table></div></div>`;
     } else {
       const byStore={};toDep.forEach(ch=>{(byStore[ch.account]=byStore[ch.account]||[]).push(ch);});
       const blocks=Object.keys(byStore).sort().map(store=>{const list=byStore[store];return `<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Store ${store}</h3><span class="sub">${list.length} check${list.length!==1?'s':''} · ${money(sum(list))}</span></div>
@@ -1585,6 +1597,12 @@ const App={
     this.logBill(b,'Approved submission',b.vendor+' · '+(b.stage==='pending'?'→ approval':'→ ready for payment'));
     this.persist();this.toast('Submission #'+b.id+' approved');this.render();
   },
+  /* ---------- bill comments (team thread on a bill) ---------- */
+  addBillComment(id){const b=BILLS.find(x=>x.id===+id);if(!b)return;const el=document.getElementById('bc_text');const t=(el&&el.value||'').trim();if(!t){this.toast('Write a comment first');return;}
+    (b.commentThread=b.commentThread||[]).push({id:Date.now(),by:CURRENT.initials,at:Date.now(),text:t});
+    this.logBill(b,'Comment added',t.slice(0,60));this.persist();this.openBill(id);
+  },
+  delBillComment(id,cid){const b=BILLS.find(x=>x.id===+id);if(!b||!canDelete()||!b.commentThread)return;b.commentThread=b.commentThread.filter(c=>c.id!==cid);this.persist();this.openBill(id);},
   /* ---------- ongoing issues: hold a bill back / send it on ---------- */
   flagIssue(id){const b=BILLS.find(x=>x.id===id);if(!b)return;
     const prev=(b.issue&&b.issue.reason)||'';
@@ -1843,6 +1861,9 @@ const App={
           <dt>Entered by</dt><dd>${b.enteredInitials}</dd>
         </dl>
         ${b.comments?`<div style="margin-top:6px"><div style="font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Memo / notes</div><div style="font-size:13px;color:var(--ink-1);white-space:pre-wrap;border:1px solid var(--line-2);border-radius:10px;padding:10px 12px">${String(b.comments).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`:''}
+        ${(()=>{const cs=(b.commentThread||[]).slice().sort((x,y)=>(y.at||0)-(x.at||0));return `<div style="margin-top:16px"><div class="card-h" style="padding:0 0 8px"><h3 style="font-size:13px">Comments</h3><span class="sub">${cs.length||''}</span></div>
+        ${cs.length?cs.map(c=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-2)"><div class="avatar" style="width:24px;height:24px;font-size:9px;flex-shrink:0">${c.by||'—'}</div><div style="flex:1;min-width:0"><div style="font-size:13px;color:var(--ink-1);white-space:pre-wrap">${escT(c.text)}</div><div style="font-size:11px;color:var(--ink-3);margin-top:2px">${c.by||'—'} · ${dOf(c.at)}</div></div>${canDelete()?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();App.delBillComment(${b.id},${c.id})">${svg(ICN.x,11)}</button>`:''}</div>`).join(''):'<div style="font-size:12.5px;color:var(--ink-3);padding:2px 0 8px">No comments yet. Add a note anyone on the team can see.</div>'}
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end"><div class="inp" style="padding:0;flex:1"><textarea id="bc_text" rows="1" placeholder="Add a comment…" style="border:none;background:none;width:100%;font:inherit;padding:8px 11px;resize:vertical"></textarea></div><button class="btn btn-gold btn-sm" onclick="App.addBillComment(${b.id})">${svg(ICN.plus,13)} Add</button></div></div>`;})()}
         ${histHtml}
       </div>
       <div class="dr-foot"><button class="btn btn-ghost" data-close>Close</button>${editDel}<div style="margin-left:auto;display:flex;gap:8px">${acts.join('')}</div></div>`);
