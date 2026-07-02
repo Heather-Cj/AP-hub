@@ -364,6 +364,11 @@ async function handleApi(req, env) {
   let body = {};
   if (req.method === 'POST') { try { body = await req.json(); } catch {} }
 
+  if (action === 'health') {
+    // public, booleans only — lets us verify integrations are wired without a login
+    return json({ ok: true, usps: uspsReady(env), email: !!(env.RESEND_API_KEY && env.ALERT_EMAIL), ms: msReady(msConfig(env)) });
+  }
+
   if (action === 'login') {
     const users = await getUsers(store);
     const user = users.find((x) => x.u.toLowerCase() === String(body.u || '').toLowerCase());
