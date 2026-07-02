@@ -553,7 +553,7 @@ const API={
 };
 
 const App={
-  state:{view:'dashboard',acct:'all',q:'',billStage:'all',method:'all',month:'all',sortKey:'id',sortDir:'desc',checkTab:'print',vMethod:'all',vStatus:'active',vSort:'name',vDir:'asc',trackTab:'send',tSort:'vendor',tDir:'asc'},
+  state:{view:'dashboard',acct:'all',q:'',billStage:'all',method:'all',month:'all',sortKey:'id',sortDir:'desc',checkTab:'cut',vMethod:'all',vStatus:'active',vSort:'name',vDir:'asc',trackTab:'send',tSort:'vendor',tDir:'asc'},
 
   async init(){
     TOKEN=LS.get('aphub_token');
@@ -758,7 +758,7 @@ const App={
     const methodOpts=['<option value="all">All methods</option>',...METHODS.map(m=>`<option ${s.method===m?'selected':''} value="${m}">${m}</option>`)].join('');
     const monthOpts=['<option value="all">All months</option>',...this.monthsList().map(mk=>`<option ${s.month===mk?'selected':''} value="${mk}">${this.monthLabel(mk)}</option>`)].join('');
     const statusGroups=[
-      ['General',[['stage_submission','Pending Submission'],['stage_pending','Pending approval'],['stage_ready','Ready for payment'],['stage_paid','Paid'],['stage_rejected','Rejected']]],
+      ['General',[['stage_submission','Pending Submission'],['stage_pending','Pending approval'],['stage_issue','On hold · issue'],['stage_ready','Ready for payment'],['stage_paid','Paid'],['stage_rejected','Rejected']]],
       ['Checks (mailed)',[['check_print','To print'],['check_cut','To cut'],['check_send','To send'],['check_transit','On the way'],['check_delivered','Payment delivered']]],
       ['Pickups (collected)',[['pickup_cut','To cut'],['pickup_pickup','Ready for pickup'],['pickup_pickedup','Picked up']]],
       ['Chase (deposited)',[['chase_print','Chase · to print'],['chase_cut','Chase · to cut'],['chase_deposit','Chase · to deposit'],['chase_closed','Chase · deposited']]],
