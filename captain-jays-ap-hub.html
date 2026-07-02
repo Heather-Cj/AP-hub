@@ -1180,22 +1180,37 @@ const App={
 
   /* ---------- VENDORS ---------- */
   // ===== EOM Tracker =====
-  eomMonths(){return ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06'];},
+  eomMonths(){const out=[];const now=new Date(todayISO+'T00:00');const d=new Date(2026,0,1);
+    while(d<=now){out.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));d.setMonth(d.getMonth()+1);}
+    return out;},
   eomData(mk){
-    // bills in this month (by received date), grouped by vendor
-    const inMonth=BILLS.filter(b=>!b.isChase&&monthKey(b.receivedDate)===mk);
-    const byVendor={};inMonth.forEach(b=>{const k=(b.vendor||'').toLowerCase();(byVendor[k]=byVendor[k]||[]).push(b);});
+    // per vendor, per STORE: this month's total vs last month's total.
+    // "Missing" = a store that had bills for this vendor last month but has none this month.
+    const [yy,mm]=mk.split('-').map(Number);
+    const pd=new Date(yy,mm-2,1);
+    const prevMk=pd.getFullYear()+'-'+String(pd.getMonth()+1).padStart(2,'0');
+    const groupV=list=>{const m={};list.forEach(b=>{const k=(b.vendor||'').toLowerCase();(m[k]=m[k]||[]).push(b);});return m;};
+    const inM=groupV(BILLS.filter(b=>!b.isChase&&monthKey(b.receivedDate)===mk));
+    const inP=groupV(BILLS.filter(b=>!b.isChase&&monthKey(b.receivedDate)===prevMk));
+    const storeSum=arr=>{const m={};(arr||[]).forEach(b=>{const s=String(b.account||'—');m[s]=m[s]||{amt:0,n:0};m[s].amt+=(+b.amount||0);m[s].n++;});return m;};
     return EOM_DEFS.map(([vendor,freq,exp])=>{
-      const got=byVendor[vendor.toLowerCase()]||[];
-      const total=got.reduce((s,b)=>s+(+b.amount||0),0);
-      const accts=new Set(got.map(b=>String(b.account||'')).filter(Boolean));
-      const present=Math.max(got.length, accts.size);
-      const expected=exp||1;
-      const missing=Math.max(0, expected-present);
+      const key=vendor.toLowerCase();
+      const cur=storeSum(inM[key]),prv=storeSum(inP[key]);
+      const stores=[...new Set([...Object.keys(cur),...Object.keys(prv)])].sort();
+      const storeRows=stores.map(s=>({store:s,cur:(cur[s]||{}).amt||0,curN:(cur[s]||{}).n||0,prev:(prv[s]||{}).amt||0,prevN:(prv[s]||{}).n||0}));
+      const total=storeRows.reduce((s,r)=>s+r.cur,0);
+      const prevTotal=storeRows.reduce((s,r)=>s+r.prev,0);
+      const present=storeRows.filter(r=>r.curN>0).length;
+      const prevStores=storeRows.filter(r=>r.prevN>0).length;
+      const expected=prevStores||exp||1;
+      const missingStores=storeRows.filter(r=>r.prevN>0&&r.curN===0).map(r=>r.store);
+      const missing=prevStores?missingStores.length:Math.max(0,expected-present);
+      const got=inM[key]||[];
       const lastPaid=got.reduce((d,b)=>{const p=b.paid&&b.paid.date;return p&&p>d?p:d;},'');
-      return {vendor,freq,expected,present,missing,total,lastPaid,complete:expected?Math.min(1,present/expected):1};
+      return {vendor,freq,expected,present,missing,missingStores,total,prevTotal,prevMk,storeRows,lastPaid,complete:expected?Math.min(1,present/expected):1};
     });
   },
+  eomExpand(v){this.state.eomOpen=this.state.eomOpen||{};this.state.eomOpen[v]=!this.state.eomOpen[v];this.render();},
   v_eom(){
     const mk=this.state.eomMonth||this.eomMonths().slice(-1)[0];
     const onlyMissing=!!this.state.eomMissing;
@@ -1207,7 +1222,7 @@ const App={
     const pct=totVendors?Math.round(100*fullyDone/totVendors):0;
     if(onlyMissing)rows=rows.filter(r=>r.missing>0);
     const ek=this.state.eSort||'missing', edir=this.state.eDir==='asc'?1:(this.state.eDir==='desc'?-1:-1);
-    const eval2=r=>{switch(ek){case 'vendor':return (r.vendor||'').toLowerCase();case 'freq':return (r.freq||'').toLowerCase();case 'present':return r.present;case 'expected':return r.expected;case 'total':return r.total;case 'progress':return r.complete;case 'lastpaid':return r.lastPaid||'';default:return r.missing;}};
+    const eval2=r=>{switch(ek){case 'vendor':return (r.vendor||'').toLowerCase();case 'freq':return (r.freq||'').toLowerCase();case 'present':return r.present;case 'expected':return r.expected;case 'total':return r.total;case 'prev':return r.prevTotal;case 'progress':return r.complete;case 'lastpaid':return r.lastPaid||'';default:return r.missing;}};
     rows.sort((a,b)=>{const x=eval2(a),y=eval2(b);if(x<y)return -1*edir;if(x>y)return 1*edir;return b.missing-a.missing||b.total-a.total;});
     const eth=(k,l,cls)=>`<th class="${cls||''}" style="cursor:pointer;user-select:none" onclick="App.eomSort('${k}')">${l}${ek===k?(edir===1?' ▲':' ▼'):''}</th>`;
     const monthOpts=this.eomMonths().map(m=>`<option value="${m}"${m===mk?' selected':''}>${this.monthLabel(m)}</option>`).join('');
@@ -1222,8 +1237,15 @@ const App={
       <div class="eom-card ${totalMissing?'warn':''}"><div class="ec-label">Missing entries</div><div class="ec-big">${totalMissing}</div><div class="ec-sub">across ${rows.filter(r=>r.missing>0).length||0} vendors</div></div>
       <div class="eom-card"><div class="ec-label">Recorded this month</div><div class="ec-big" style="font-size:22px">${money(monthTotal)}</div><div class="ec-sub">${this.monthLabel(mk)}</div></div>
     </div>
-    <div class="card"><div class="tablewrap"><table><thead><tr>${eth('vendor','Vendor')}${eth('freq','Frequency')}${eth('present','Present','r')}${eth('expected','Expected','r')}${eth('missing','Missing','r')}${eth('progress','Progress')}${eth('total','Total','r')}${eth('lastpaid','Last paid')}</tr></thead>
-      <tbody>${rows.length?rows.map(r=>{const c=Math.round(r.complete*100);const col=r.missing===0?'var(--green)':(r.present===0?'var(--red)':'var(--gold)');return `<tr><td><b>${r.vendor}</b></td><td style="font-size:12.5px;color:var(--ink-2)">${r.freq}</td><td class="r mono">${r.present}</td><td class="r mono" style="color:var(--ink-3)">${r.expected}</td><td class="r mono" style="font-weight:700;color:${r.missing?'var(--red)':'var(--ink-3)'}">${r.missing||'—'}</td><td><div class="eom-bar"><div style="width:${c}%;background:${col}"></div></div></td><td class="r mono" style="font-weight:600">${r.total?money(r.total):'—'}</td><td style="font-size:12px;color:var(--ink-2);white-space:nowrap">${r.lastPaid?fmtD(r.lastPaid):'<span style="color:var(--red)">never</span>'}</td></tr>`}).join(''):`<tr><td colspan="8"><div class="empty">${svg(ICN.check,28)}<div>Nothing missing this month.</div></div></td></tr>`}</tbody>
+    <div class="card"><div class="tablewrap"><table><thead><tr>${eth('vendor','Vendor')}${eth('freq','Frequency')}${eth('present','Stores billed','r')}${eth('missing','Missing','r')}${eth('progress','Progress')}${eth('prev','Last month','r')}${eth('total','This month','r')}<th class="r">Δ</th>${eth('lastpaid','Last paid')}</tr></thead>
+      <tbody>${rows.length?rows.map(r=>{const c=Math.round(r.complete*100);const col=r.missing===0?'var(--green)':(r.present===0?'var(--red)':'var(--gold)');
+        const open=(this.state.eomOpen||{})[r.vendor];
+        const dv=r.prevTotal?((r.total-r.prevTotal)/r.prevTotal*100):null;
+        const dHtml=dv===null?'<span style="color:var(--ink-3)">—</span>':`<span style="${Math.abs(dv)>15?'color:var(--red);font-weight:600':'color:var(--ink-3)'}">${dv>0?'+':''}${dv.toFixed(0)}%</span>`;
+        const main=`<tr class="click" onclick="App.eomExpand('${r.vendor.replace(/'/g,"\\'")}')"><td><span style="display:inline-block;width:14px;color:var(--ink-3)">${open?'▾':'▸'}</span><b>${r.vendor}</b></td><td style="font-size:12.5px;color:var(--ink-2)">${r.freq}</td><td class="r mono">${r.present}<span style="color:var(--ink-3)">/${r.expected}</span></td><td class="r mono" style="font-weight:700;color:${r.missing?'var(--red)':'var(--ink-3)'}">${r.missing||'—'}</td><td><div class="eom-bar"><div style="width:${c}%;background:${col}"></div></div></td><td class="r mono" style="color:var(--ink-3)">${r.prevTotal?money(r.prevTotal):'—'}</td><td class="r mono" style="font-weight:600">${r.total?money(r.total):'—'}</td><td class="r mono" style="font-size:12px">${dHtml}</td><td style="font-size:12px;color:var(--ink-2);white-space:nowrap">${r.lastPaid?fmtD(r.lastPaid):'<span style="color:var(--red)">never</span>'}</td></tr>`;
+        const subs=open?r.storeRows.map(sr=>{const sd=sr.prev?((sr.cur-sr.prev)/sr.prev*100):null;const miss=sr.prevN>0&&sr.curN===0;
+          return `<tr style="background:var(--surface-2)"><td colspan="5" style="padding-left:38px"><span class="entity-chip"><span class="pin"></span>${sr.store}</span>${miss?' <span class="badge b-red" style="font-size:9px;padding:1px 6px">MISSING THIS MONTH</span>':''}${sr.curN>1?` <span style="font-size:11px;color:var(--ink-3)">${sr.curN} bills</span>`:''}</td><td class="r mono" style="color:var(--ink-3)">${sr.prev?money(sr.prev):'—'}</td><td class="r mono" style="font-weight:600">${sr.cur?money(sr.cur):'—'}</td><td class="r mono" style="font-size:12px">${sd===null?'<span style="color:var(--ink-3)">—</span>':`<span style="${Math.abs(sd)>15?'color:var(--red);font-weight:600':'color:var(--ink-3)'}">${sd>0?'+':''}${sd.toFixed(0)}%</span>`}</td><td></td></tr>`;}).join(''):'';
+        return main+subs;}).join(''):`<tr><td colspan="9"><div class="empty">${svg(ICN.check,28)}<div>Nothing missing this month.</div></div></td></tr>`}</tbody>
     </table></div></div>`;
   },
   eomSet(k,v){if(k==='month')this.state.eomMonth=v;if(k==='missing')this.state.eomMissing=v;this.render();},
