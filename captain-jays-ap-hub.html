@@ -489,7 +489,10 @@ const printedCount=()=>BILLS.filter(b=>((b.isChase||b.payType==='check'||b.payTy
 /* group chase checks awaiting deposit into per-store batches of 8; returns label for one check */
 function depositBatchLabel(ch){const peers=BILLS.filter(b=>b.isChase&&b.chaseStage==='deposit'&&b.account===ch.account).sort((a,b)=>((a.printed&&a.printed.date)||'').localeCompare((b.printed&&b.printed.date)||'')||a.id-b.id);const i=peers.findIndex(b=>b.id===ch.id);return ch.account+'-'+(Math.floor(Math.max(i,0)/CHECK_BATCH)+1);}
 /* generic row sorter driven by App.state.sortKey / sortDir */
-function sortBy(rows,key,dir){const s=dir==='desc'?-1:1;const val=(b)=>{switch(key){case 'id':return b.id;case 'amount':return +b.amount||0;case 'vendor':return (b.vendor||'').toLowerCase();case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'method':return (b.method||'').toLowerCase();case 'due':return b.due||'';case 'invdate':return b.invoiceDate||'';case 'printed':return (b.printed&&b.printed.date)||'';case 'date':return (b.paid&&b.paid.date)||(b.printed&&b.printed.date)||'';case 'check':return b.checkNumber||(b.isChase&&b.tracking)||'';case 'status':return (b.isChase?b.chaseStage:b.payType==='check'?b.checkStage:b.stage)||'';default:return b.id;}};return rows.slice().sort((a,b)=>{const x=val(a),y=val(b);if(x<y)return -1*s;if(x>y)return 1*s;return (a.id-b.id)*s;});}
+function sortVal(b,key){switch(key){case 'id':return b.id;case 'amount':return +b.amount||0;case 'vendor':return (b.vendor||'').toLowerCase();case 'account':return b.account||'';case 'inv':return (b.inv||'').toLowerCase();case 'method':return (b.method||'').toLowerCase();case 'due':return b.due||'';case 'invdate':return b.invoiceDate||'';case 'received':return b.receivedDate||'';case 'printed':return (b.printed&&b.printed.date)||'';case 'date':return (b.paid&&b.paid.date)||(b.printed&&b.printed.date)||'';case 'check':return b.checkNumber||(b.isChase&&b.tracking)||'';case 'status':return (b.isChase?b.chaseStage:b.payType==='check'?b.checkStage:b.stage)||'';default:return b.id;}}
+function sortBy(rows,key,dir){const s=dir==='desc'?-1:1;return rows.slice().sort((a,b)=>{const x=sortVal(a,key),y=sortVal(b,key);if(x<y)return -1*s;if(x>y)return 1*s;return (a.id-b.id)*s;});}
+/* multi-key sort by a stack of {key,dir} */
+function multiSortRows(rows,stack){if(!stack||!stack.length)return rows.slice();return rows.slice().sort((a,b)=>{for(const {key,dir} of stack){const s=dir==='desc'?-1:1;const x=sortVal(a,key),y=sortVal(b,key);if(x<y)return -1*s;if(x>y)return 1*s;}return a.id-b.id;});}
 /* ---- monthly vendor+account totals ---- */
 const monthTotal=(vn,acct,mk)=>BILLS.filter(b=>!b.isChase&&b.vendor===vn&&b.account===acct&&monthKey(b.receivedDate)===mk).reduce((s,b)=>s+(+b.amount||0),0);
 function billIsUtility(b){if(!b)return false;const gl=String(b.gl||'').toLowerCase();if(gl==='utilities')return true;if(typeof VGL!=='undefined'&&b.vendor&&VGL[b.vendor]==='Utilities')return true;return false;}
@@ -696,9 +699,13 @@ const App={
   /* ---- shared sorting / filtering / export ---- */
   statusText(b){const m=b.isChase?CHASE_STAGES[b.chaseStage]:b.payType==='pickup'?PICKUP_STAGES[b.checkStage]:b.payType==='check'?CHECK_STAGES[b.checkStage]:STAGES[b.stage];return (m&&m[1])||'—';},
   statusKey(b){if(b.isChase)return 'chase_'+(b.chaseStage||'?');if(b.payType==='pickup')return 'pickup_'+(b.checkStage||'?');if(b.payType==='check')return 'check_'+(b.checkStage||'?');return 'stage_'+(b.stage||'?');},
-  setSort(k){const s=this.state;if(s.sortKey===k){s.sortDir=s.sortDir==='asc'?'desc':'asc';}else{s.sortKey=k;s.sortDir='asc';}this.render();},
-  sortHdr(key,label,cls){const s=this.state;const on=s.sortKey===key;const ar=on?(s.sortDir==='asc'?' ▲':' ▼'):'';return `<th class="${cls||''}" data-sort="${key}" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${ar}</th>`;},
-  applySort(rows){return sortBy(rows,this.state.sortKey,this.state.sortDir);},
+  setSort(k,additive){const s=this.state;s.sortStack=s.sortStack||[];const i=s.sortStack.findIndex(x=>x.key===k);
+    if(additive){if(i>=0)s.sortStack[i].dir=s.sortStack[i].dir==='asc'?'desc':'asc';else s.sortStack.push({key:k,dir:'asc'});}
+    else{if(s.sortStack.length===1&&i===0)s.sortStack[0].dir=s.sortStack[0].dir==='asc'?'desc':'asc';else s.sortStack=[{key:k,dir:'asc'}];}
+    s.sortKey=s.sortStack[0].key;s.sortDir=s.sortStack[0].dir;this.render();},
+  clearSort(){this.state.sortStack=[];this.render();},
+  sortHdr(key,label,cls){const st=this.state.sortStack||[];const i=st.findIndex(x=>x.key===key);const on=i>=0;const ar=on?(st[i].dir==='asc'?' ▲':' ▼'):'';const num=(on&&st.length>1)?`<sup style="font-size:9px;color:var(--gold);font-weight:700">${i+1}</sup>`:'';return `<th class="${cls||''}" data-sort="${key}" title="Click to sort · Shift-click to add a sort level" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${ar}${num}</th>`;},
+  applySort(rows){const st=this.state.sortStack;if(st&&st.length)return multiSortRows(rows,st);return sortBy(rows,this.state.sortKey,this.state.sortDir);},
   monthsList(){const set={};BILLS.forEach(b=>{const mk=monthKey(b.receivedDate);if(mk)set[mk]=1;});set[monthKey(todayISO)]=1;return Object.keys(set).sort().reverse();},
   monthLabel(mk){if(!mk)return '';const p=mk.split('-');return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(+p[1])-1]+' '+p[0];},
   matchBill(b){const s=this.state;const q=(s.q||'').toLowerCase();
@@ -708,6 +715,13 @@ const App={
     if(q){const qn=q.replace(/[\s-]/g,'');const strip=x=>String(x||'').toLowerCase().replace(/[\s-]/g,'');const v=vendor(b.vendor);const acctHit=v&&v.accounts&&Object.values(v.accounts).some(no=>{const s=String(no).toLowerCase();return s.includes(q)||strip(no).includes(qn);});
       const hit=String(b.id).includes(q)||String(b.id).includes(qn)||(b.vendor||'').toLowerCase().includes(q)||strip(b.vendor).includes(qn)||(b.inv||'').toLowerCase().includes(q)||strip(b.inv).includes(qn)||(b.account||'').toLowerCase().includes(q)||strip(b.account).includes(qn)||String(b.checkNumber||'').toLowerCase().includes(q)||strip(b.checkNumber).includes(qn)||acctHit;
       if(!hit)return false;}
+    const qk=s.quick||{};
+    if(qk.unpaid&&!billUnpaid(b))return false;
+    if(qk.notCut&&(b.cut||b.paid||b.delivered))return false;
+    if(qk.notDelivered&&(b.delivered||b.paid||b.checkStage==='pickedup'||b.chaseStage==='closed'))return false;
+    if(qk.edited&&!b.receivedEdited)return false;
+    if(s.recvFrom&&(b.receivedDate||'')<s.recvFrom)return false;
+    if(s.recvTo&&(b.receivedDate||'')>s.recvTo)return false;
     return true;},
   filterControls(withStatus){const s=this.state;
     const acctOpts=['<option value="all">All accounts</option>',...ACCOUNTS.map(a=>`<option ${s.acct===a.code?'selected':''} value="${a.code}">${a.code}</option>`)].join('');
@@ -720,7 +734,18 @@ const App={
       ['Chase (deposited)',[['chase_print','Chase · to print'],['chase_cut','Chase · to cut'],['chase_deposit','Chase · to deposit'],['chase_closed','Chase · deposited']]],
     ];
     const statusSel=withStatus?`<select class="selent" data-stage><option value="all">All statuses</option>${statusGroups.map(([g,opts])=>`<optgroup label="${g}">${opts.map(([k,l])=>`<option ${s.billStage===k?'selected':''} value="${k}">${l}</option>`).join('')}</optgroup>`).join('')}</select>`:'';
-    return `<select class="selent" data-acct>${acctOpts}</select><select class="selent" data-method>${methodOpts}</select>${statusSel}<select class="selent" data-month>${monthOpts}</select>`;},
+    const qk=s.quick||{};
+    const chip=(k,l)=>`<button class="btn ${qk[k]?'btn-gold':'btn-ghost'} btn-sm" data-quick="${k}">${l}</button>`;
+    const st=s.sortStack||[];
+    const quickBar=withStatus?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%;margin-top:2px">
+      <span style="font-size:11px;color:var(--ink-3)">Quick:</span>${chip('notCut','Not cut')}${chip('notDelivered','Not delivered')}${chip('unpaid','Unpaid')}${chip('edited','Received edited')}
+      <span style="font-size:11px;color:var(--ink-3);margin-left:6px">Received</span>
+      <input type="date" class="selent" data-recvfrom value="${s.recvFrom||''}" style="padding:5px 8px" title="Received from">
+      <span style="font-size:11px;color:var(--ink-3)">–</span>
+      <input type="date" class="selent" data-recvto value="${s.recvTo||''}" style="padding:5px 8px" title="Received to">
+      ${st.length>1?`<span style="font-size:11px;color:var(--ink-3);margin-left:6px">Sorted by ${st.length} cols</span><button class="btn btn-ghost btn-sm" data-clearsort>clear sort</button>`:'<span style="font-size:11px;color:var(--ink-3);margin-left:6px">tip: Shift-click headers to sort by several columns</span>'}
+    </div>`:'';
+    return `<select class="selent" data-acct>${acctOpts}</select><select class="selent" data-method>${methodOpts}</select>${statusSel}<select class="selent" data-month>${monthOpts}</select>${quickBar}`;},
   exportXlsx(rows,name){
     if(typeof XLSX==='undefined'){this.toast('Excel export is still loading — try again in a moment');return;}
     const data=rows.map(b=>({ID:b.id,Vendor:b.vendor,Account:b.account,Invoice:b.inv,Amount:+b.amount||0,Method:b.method||'',Status:this.statusText(b),'Check #':b.checkNumber||(b.isChase?b.tracking:'')||'',GL:b.gl||'',Received:fmtD(b.receivedDate),Due:b.due?fmtD(b.due):'','Send by':b.due?fmtD(sendByISO(b.due)):'','Paid/Delivered':b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):''),'By':(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||'',Link:b.link||''}));
@@ -901,12 +926,13 @@ const App={
       <div style="margin-left:auto;display:flex;gap:10px;align-items:center"><span style="color:var(--ink-3);font-size:13px">${total} bill${total!==1?'s':''}</span>${CURRENT.role==='admin'?`<button class="btn btn-ghost btn-sm" data-export="bills">${svg(ICN.bills,14)} Export Excel</button>`:''}${can('create')?`<button class="btn btn-gold btn-sm" data-new>${svg(ICN.plus,14)} New bill</button>`:''}</div>
     </div>
     <div class="card"><div class="tablewrap"><table>
-      <thead><tr>${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th>${this.sortHdr('id','ID')}</tr></thead>
+      <thead><tr>${this.sortHdr('account','Account')}${this.sortHdr('vendor','Vendor')}${this.sortHdr('inv','Invoice #')}${this.sortHdr('invdate','Inv. date')}${this.sortHdr('received','Received')}${this.sortHdr('amount','Amount','r')}${this.sortHdr('method','Method')}${this.sortHdr('status','Status')}${this.sortHdr('check','Check #')}${this.sortHdr('printed','Printed')}${this.sortHdr('due','Due')}${this.sortHdr('date','Paid')}<th>By</th>${this.sortHdr('id','ID')}</tr></thead>
       <tbody>${shown.length?shown.map(b=>`<tr class="click" data-bill="${b.id}">
         <td><span class="entity-chip clickacct" data-acct-set="${b.account}" style="cursor:pointer"><span class="pin"></span>${b.account}</span></td>
         <td><div class="vendorcell"><div class="vlogo">${abbr(b.vendor)}</div><div class="vmeta"><b>${b.vendor}</b><span>${b.gl||'—'}</span></div></div></td>
         <td class="mono">${invOf(b)}</td>
         <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.invoiceDate?fmtD(b.invoiceDate):'—'}</td>
+        <td class="mono" style="font-size:12px;color:var(--ink-2);white-space:nowrap">${b.receivedDate?fmtD(b.receivedDate):'—'}${b.receivedEdited?' <span class="badge b-amber" style="font-size:8px;padding:0 4px">e</span>':''}</td>
         <td class="r mono" style="font-weight:600">${money(b.amount)}</td>
         <td style="font-size:12.5px">${b.method||(()=>{const vd=vendor(b.vendor);return vd&&vd.m?`<span style="color:var(--ink-3)">${vd.m==='To be Picked Up'?'Pickup':vd.m} <span style="font-size:10px">· default</span></span>`:'<span style="color:var(--ink-3)">— set by AP</span>';})()}${(b.paidViaChase||b.chaseFlag)?' <span class="badge b-violet" style="font-size:9px;padding:1px 6px">CHASE</span>':''}</td>
         <td>${statusBadge(b)}</td>
@@ -916,7 +942,7 @@ const App={
         <td class="mono" style="font-size:12px;color:var(--ink-2)">${b.paid?fmtD(b.paid.date):(b.delivered?fmtD(b.delivered.date):'—')}</td>
         <td style="font-size:12px">${(b.paid&&b.paid.initials)||(b.delivered&&b.delivered.initials)||'—'}</td>
         <td class="mono" style="font-weight:700">#${b.id}${b.link?` <a href="${b.link}" target="_blank" rel="noopener" title="View bill" onclick="event.stopPropagation()" style="color:var(--blue)">${svg(ICN.arrow,12)}</a>`:''}</td>
-      </tr>`).join(''):`<tr><td colspan="13"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
+      </tr>`).join(''):`<tr><td colspan="14"><div class="empty">${svg(ICN.bills,30)}<div>No bills match.</div></div></td></tr>`}</tbody>
     </table></div>${more>0?`<div style="padding:12px 16px;text-align:center;border-top:1px solid var(--line-2)"><button class="btn btn-ghost btn-sm" data-more="bill">Show ${Math.min(150,more)} more · ${more} hidden</button> <span style="font-size:12px;color:var(--ink-3);margin-left:8px">Tip: use search or filters to narrow down</span></div>`:''}</div>`;
   },
 
@@ -1476,7 +1502,11 @@ const App={
     v.querySelectorAll('[data-stage]').forEach(s=>s.onchange=()=>{this.state.billStage=s.value;this.render()});
     v.querySelectorAll('[data-method]').forEach(s=>s.onchange=()=>{this.state.method=s.value;this.render()});
     v.querySelectorAll('[data-month]').forEach(s=>s.onchange=()=>{this.state.month=s.value;this.render()});
-    v.querySelectorAll('[data-sort]').forEach(h=>h.onclick=()=>this.setSort(h.dataset.sort));
+    v.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>{this.state.quick=this.state.quick||{};this.state.quick[b.dataset.quick]=!this.state.quick[b.dataset.quick];this.render()});
+    v.querySelectorAll('[data-recvfrom]').forEach(el=>el.onchange=()=>{this.state.recvFrom=el.value;this.render()});
+    v.querySelectorAll('[data-recvto]').forEach(el=>el.onchange=()=>{this.state.recvTo=el.value;this.render()});
+    v.querySelectorAll('[data-clearsort]').forEach(b=>b.onclick=()=>this.clearSort());
+    v.querySelectorAll('[data-sort]').forEach(h=>h.onclick=(e)=>this.setSort(h.dataset.sort,e.shiftKey));
     v.querySelectorAll('[data-checktab]').forEach(b=>b.onclick=()=>{this.state.checkTab=b.dataset.checktab;this.render()});
     v.querySelectorAll('[data-tracktab]').forEach(b=>b.onclick=()=>{this.state.trackTab=b.dataset.tracktab;this.render()});
     v.querySelectorAll('[data-apprtab]').forEach(b=>b.onclick=()=>{this.state.apprTab=b.dataset.apprtab;this.render()});
@@ -1532,8 +1562,9 @@ const App={
           <div class="field" style="min-width:0"><label>Amount</label><div class="inp" style="padding:0"><input id="f_amt" type="number" step="0.01" inputmode="decimal" oninput="App.entryRecalc()" placeholder="0.00" style="${inp};min-width:0;width:100%"></div></div>
           <div class="field" style="min-width:0"><label>Invoice date</label>${dateField('f_invdate','')}</div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="field" style="min-width:0"><label>Due date</label>${dateField('f_due','','App.entryRecalc()')}</div>
+          <div class="field" style="min-width:0"><label>Received date <span style="color:var(--ink-3)">· defaults today</span></label>${dateField('f_recv',todayISO)}</div>
         </div>
         <div class="field"><label>Memo / notes <span style="color:var(--ink-3)">· optional</span></label><div class="inp" style="padding:0"><textarea id="f_memo" rows="2" placeholder="Notes about this bill…" style="border:none;background:none;width:100%;font:inherit;padding:9px 11px;resize:vertical"></textarea></div></div>
         <div class="field"><label>GL account <span style="color:var(--ink-3)">· auto-fills for known vendors</span></label><div class="inp" style="padding:0"><input id="f_gl" list="gllist" placeholder="e.g. Utilities, Rent, Supplies…" style="${inp}"></div><datalist id="gllist"><option value="Utilities"><option value="Rent"><option value="Supplies"><option value="Insurance"><option value="Repairs & Maintenance"><option value="Food · COGS"><option value="Licenses & Fees"><option value="Security"></datalist></div>
@@ -1548,7 +1579,7 @@ const App={
           <div class="field"><label>Approval required?</label><select id="f_approq" class="selent" style="width:100%" onchange="App.createApprToggle()"><option value="no">No — straight to payment</option><option value="yes">Yes — needs sign-off</option></select></div>
           <div class="field" id="f_appr_wrap" style="display:none"><label>Approver</label><select id="f_approver" class="selent" style="width:100%">${this.approverOptions()}</select></div>
         </div>
-        <p style="font-size:11.5px;color:var(--ink-3);margin-top:14px;display:flex;gap:6px;align-items:flex-start">${svg(ICN.bolt,13)}<span>Received date is set automatically (today). ID assigned automatically. Your initials <b>${CURRENT.initials}</b> tag this entry.</span></p>
+        <p style="font-size:11.5px;color:var(--ink-3);margin-top:14px;display:flex;gap:6px;align-items:flex-start">${svg(ICN.bolt,13)}<span>Received date defaults to today — change it if the bill came in earlier (edits are tracked). ID assigned automatically. Your initials <b>${CURRENT.initials}</b> tag this entry.</span></p>
       </div>
       <div class="dr-foot"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-gold" style="margin-left:auto" onclick="App.saveCreate()">${CURRENT.inTraining?'Submit for review':'Save bill'}</button></div>`);
     this.entryRecalc();
@@ -1568,7 +1599,8 @@ const App={
     const dup=BILLS.find(x=>!x.isChase&&!x._deletedAt&&x.vendor===v.n&&((invn&&String(x.inv||'').toLowerCase()===invn)||(String(x.account)===String(account)&&Math.abs((+x.amount||0)-amount)<0.005&&monthKey(x.receivedDate)===monthKey(todayISO))));
     if(dup&&!confirm('Possible duplicate — bill #'+dup.id+' for '+v.n+' ('+dup.account+' · '+(dup.inv||'no invoice #')+' · '+money(dup.amount)+') already exists.\n\nEnter this bill anyway?'))return;
     const comments=(g('f_memo')?g('f_memo').value:'').trim();
-    const b={id:nextId++,vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,chaseFlag,link,comments,receivedDate:todayISO,
+    const recvISO=(g('f_recv')?mdyToISO(g('f_recv').value):'')||todayISO;
+    const b={id:nextId++,vendor:v.n,account,inv,amount,due,invoiceDate,gl,prepaid,chaseFlag,link,comments,receivedDate:recvISO,receivedEdited:recvISO!==todayISO,
       method:null,tracking:'',payType:null,enteredBy:CURRENT.u,enteredInitials:CURRENT.initials,
       reqApproval:{required:approq,approver},
       stage:'submission',approval:null,paid:null,pickedUp:null,sync:'synced'};
@@ -1845,7 +1877,7 @@ const App={
           <dt>Bill ID</dt><dd class="mono" style="font-weight:700">#${b.id}</dd>
           <dt>Invoice #</dt><dd class="mono">${invOf(b)}</dd>
           <dt>GL account</dt><dd>${b.gl||'—'}</dd>
-          <dt>Received</dt><dd class="mono">${fmtD(b.receivedDate)}</dd>
+          <dt>Received</dt><dd class="mono">${fmtD(b.receivedDate)}${b.receivedEdited?' <span class="badge b-amber" style="font-size:8px;padding:0 5px;vertical-align:middle">edited</span>':''}</dd>
           <dt>Due date</dt><dd class="mono">${b.due?fmtD(b.due):'—'}</dd>
           ${sb?`<dt>Send by</dt><dd class="mono">${fmtD(sb)} <span style="color:var(--ink-3)">(due − ${LEAD}d)</span></dd>`:''}
           <dt>Method</dt><dd>${b.method||'<span style="color:var(--ink-3)">not set yet (AP)</span>'}${b.paidViaChase?` · <span style="color:#7c3aed">rolled into Chase ${b.account}</span>`:''}</dd>
@@ -2101,6 +2133,7 @@ const App={
         <div class="field"><label>Invoice #</label><div class="inp" style="padding:0"><input id="e_inv" value="${(b.inv||'').replace(/"/g,'&quot;')}" style="${inp}"></div></div>
         <div class="field"><label>GL account</label><div class="inp" style="padding:0"><input id="e_gl" value="${(b.gl||'').replace(/"/g,'&quot;')}" placeholder="e.g. Food, Supplies" style="${inp}"></div></div>
         <div class="field"><label>Invoice date</label>${dateField('e_invdate',b.invoiceDate||'')}</div>
+        <div class="field"><label>Received date${b.receivedEdited?' <span class="badge b-amber" style="font-size:9px;padding:0 5px;vertical-align:middle">edited</span>':''}</label>${dateField('e_recv',b.receivedDate||'')}</div>
         <div class="field"><label>Due date</label>${dateField('e_due',b.due||'')}</div>
         <div class="field"><label>Bill link <span style="color:var(--ink-3)">· optional</span></label><div class="inp" style="padding:0"><input id="e_link" value="${(b.link||'').replace(/"/g,'&quot;')}" placeholder="https://" style="${inp}"></div></div>
         <div class="field"><label>Memo / notes <span style="color:var(--ink-3)">· optional</span></label><div class="inp" style="padding:0"><textarea id="e_memo" rows="2" placeholder="Notes about this bill…" style="border:none;background:none;width:100%;font:inherit;padding:9px 11px;resize:vertical">${(b.comments||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea></div></div>
@@ -2113,13 +2146,14 @@ const App={
   },
   saveEditBill(id){const b=BILLS.find(x=>x.id===+id);if(!b||!canEdit('bills'))return;
     const g=s=>{const e=$(s);return e?e.value:undefined;};
-    const before={vendor:b.vendor,account:b.account,amount:b.amount,inv:b.inv,gl:b.gl,due:b.due,invoiceDate:b.invoiceDate,link:b.link,method:b.method,comments:b.comments};
+    const before={vendor:b.vendor,account:b.account,amount:b.amount,inv:b.inv,gl:b.gl,due:b.due,invoiceDate:b.invoiceDate,receivedDate:b.receivedDate,link:b.link,method:b.method,comments:b.comments};
     const nv=(g('#e_vendor')||b.vendor),na=(g('#e_acct')||b.account),ninv=((g('#e_inv')||'').trim()||b.inv);
     const namt=parseFloat(g('#e_amt'));
     if(FAISAL.includes(na)&&b.method&&b.method==='ACH'){this.toast('Account '+na+' is check-only — change the method first');return;}
     b.vendor=nv;b.account=na;b.inv=ninv;b.gl=(g('#e_gl')||'').trim();b.due=mdyToISO(g('#e_due')||'');b.link=(g('#e_link')||'').trim();
     if(g('#e_memo')!==undefined)b.comments=(g('#e_memo')||'').trim();
     const ninvd=mdyToISO(g('#e_invdate')||'');b.invoiceDate=ninvd;
+    const nrecv=mdyToISO(g('#e_recv')||'')||b.receivedDate;if(nrecv!==(b.receivedDate||'')){b.receivedDate=nrecv;b.receivedEdited=true;}
     if(!isNaN(namt))b.amount=namt;
     if(canEdit('payments')){const m=g('#e_method');if(m)b.method=m;const pd=mdyToISO(g('#e_paydate')||'');if(pd){if(b.paid)b.paid.date=pd;else if(b.printed)b.printed.date=pd;}}
     const chg=[];
@@ -2131,6 +2165,7 @@ const App={
     diff('invoice #','inv',before.inv,b.inv);
     diff('GL','gl',before.gl,b.gl);
     diff('invoice date','invoiceDate',before.invoiceDate,b.invoiceDate);
+    diff('received date','invoiceDate',before.receivedDate,b.receivedDate);
     diff('due','due',before.due,b.due);
     diff('link','link',before.link,b.link);
     diff('method','method',before.method,b.method);
