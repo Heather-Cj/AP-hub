@@ -2627,6 +2627,18 @@ const App={
     }
     p.innerHTML=head+bodyHtml;
     document.body.appendChild(p);
+    if(b.link)this.upgradePreview(b.link);
+  },
+  /* Swap the raw OneDrive/SharePoint iframe for a guaranteed-embeddable Microsoft Graph
+     preview URL when the MS_* connection is configured. Silently no-ops until then. */
+  upgradePreview(link){
+    this._pvCache=this._pvCache||{};
+    const apply=u=>{const f=document.querySelector('#billpreview iframe');if(f&&u&&f.src!==u)f.src=u;};
+    if(link in this._pvCache){apply(this._pvCache[link]);return;}
+    this._pvCache[link]=null;
+    API.call('filePreview',{token:TOKEN,url:link}).then(d=>{
+      if(d&&d.ok&&d.getUrl){this._pvCache[link]=d.getUrl;apply(d.getUrl);}
+    }).catch(()=>{});
   },
   persist(){ if(!TOKEN)return; API.saveOps().catch(e=>{ if(e.offline){API.online=false;this.toast('Offline — changes not saved');} else {this.toast('Save failed — '+(e.message||''));} }); },
 

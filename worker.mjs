@@ -496,6 +496,19 @@ async function handleApi(req, env) {
     return json({ ok: true, restored: day, bills, gen: bmeta.gen });
   }
 
+  // --- OneDrive/SharePoint file preview via Microsoft Graph (needs MS_* secrets) ---
+  if (action === 'filePreview') {
+    if (!(MS.tenant && MS.client && MS.secret)) return json({ configured: false, error: 'Microsoft not connected yet' }, 200);
+    const url = String(body.url || '').trim();
+    if (!/^https:\/\//.test(url)) return json({ error: 'Bad url' }, 400);
+    try {
+      // Graph "shares" API: base64url-encode the share link → embeddable preview URL
+      const b64 = btoa(unescape(encodeURIComponent(url))).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+      const prev = await graph(MS, `/shares/u!${b64}/driveItem/preview`, { method: 'POST', body: JSON.stringify({}) });
+      return json({ ok: true, getUrl: prev.getUrl || null });
+    } catch (e) { return json({ error: String(e.message || e) }, 200); }
+  }
+
   // --- USPS tracking (admin) ---
   if (action === 'uspsStatus') {
     return json({ configured: uspsReady(env), emailConfigured: !!(env.RESEND_API_KEY && env.ALERT_EMAIL) });
